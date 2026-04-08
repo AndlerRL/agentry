@@ -1,0 +1,53 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/agentry-core",
+    "crates/agentry-agents",
+    "crates/agentry-sync",
+    "crates/agentry-skills",
+    "crates/agentry-openclaw",
+    "crates/agentry-acp",
+    "crates/agentry-tui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["AndlerRL <andler@andler.dev>"]
+
+[workspace.dependencies]
+# Core
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+toml = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Git
+git2 = "0.19"
+
+# Crypto
+sha1 = "0.10"
+
+# Internal crates
+agentry-core = { path = "crates/agentry-core" }
+agentry-agents = { path = "crates/agentry-agents" }
+agentry-sync = { path = "crates/agentry-sync" }
+agentry-skills = { path = "crates/agentry-skills" }
+agentry-openclaw = { path = "crates/agentry-openclaw" }
+agentry-acp = { path = "crates/agentry-acp" }

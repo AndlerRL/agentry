@@ -1,0 +1,14 @@
+/Users/andler-mini/Development/tools/agentry/target/debug/deps/thiserror-1d8c40ba17680e3f.d: /Users/andler-mini/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/lib.rs /Users/andler-mini/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/aserror.rs /Users/andler-mini/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/display.rs /Users/andler-mini/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/var.rs /Users/andler-mini/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/private.rs /Users/andler-mini/Development/tools/agentry/target/debug/build/thiserror-1fe9c061736236f5/out/private.rs
+
+/Users/andler-mini/Development/tools/agentry/target/debug/deps/libthiserror-1d8c40ba17680e3f.rlib: /Users/andler-mini/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/lib.rs /Users/andler-mini/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/aserror.rs /Users/andler-mini/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/display.rs /Users/andler-mini/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/var.rs /Users/andler-mini/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/private.rs /Users/andler-mini/Development/tools/agentry/target/debug/build/thiserror-1fe9c061736236f5/out/private.rs
+
+/Users/andler-mini/Development/tools/agentry/target/debug/deps/libthiserror-1d8c40ba17680e3f.rmeta: /Users/andler-mini/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/lib.rs /Users/andler-mini/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/aserror.rs /Users/andler-mini/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/display.rs /Users/andler-mini/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/var.rs /Users/andler-mini/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/private.rs /Users/andler-mini/Development/tools/agentry/target/debug/build/thiserror-1fe9c061736236f5/out/private.rs
+
+/Users/andler-mini/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/lib.rs:
+/Users/andler-mini/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/aserror.rs:
+/Users/andler-mini/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/display.rs:
+/Users/andler-mini/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/var.rs:
+/Users/andler-mini/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/private.rs:
+/Users/andler-mini/Development/tools/agentry/target/debug/build/thiserror-1fe9c061736236f5/out/private.rs:
+
+# env-dep:OUT_DIR=/Users/andler-mini/Development/tools/agentry/target/debug/build/thiserror-1fe9c061736236f5/out

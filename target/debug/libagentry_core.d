@@ -1,0 +1,1 @@
+/Users/andler-mini/Development/tools/agentry/target/debug/libagentry_core.rlib: /Users/andler-mini/Development/tools/agentry/crates/agentry-core/src/format.rs /Users/andler-mini/Development/tools/agentry/crates/agentry-core/src/lib.rs /Users/andler-mini/Development/tools/agentry/crates/agentry-core/src/models.rs
