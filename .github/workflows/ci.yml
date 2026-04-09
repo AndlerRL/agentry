@@ -8,6 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
@@ -47,6 +48,8 @@ jobs:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
@@ -57,37 +60,57 @@ jobs:
         run: cargo build --release --target aarch64-apple-darwin
       - name: Build macOS x86_64
         run: cargo build --release --target x86_64-apple-darwin
-      - name: Create release archive
+      - name: Create macOS universal binary
         run: |
           mkdir -p release
+          lipo -create \
+            target/aarch64-apple-darwin/release/agentry \
+            target/x86_64-apple-darwin/release/agentry \
+            -output release/agentry-macos-universal
           cp target/aarch64-apple-darwin/release/agentry release/agentry-aarch64-apple-darwin
           cp target/x86_64-apple-darwin/release/agentry release/agentry-x86_64-apple-darwin
           chmod +x release/*
-      - name: Upload artifacts
+          cd release && tar czf agentry-macos.tar.gz agentry-*
+      - name: Upload macOS release
         uses: actions/upload-artifact@v4
         with:
-          name: agentry-release
-          path: release/
+          name: agentry-macos
+          path: release/agentry-macos.tar.gz
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/agentry-macos.tar.gz
+          generate_release_notes: true
 
   release-linux:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-gnu
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev
       - name: Build Linux x86_64
         run: cargo build --release --target x86_64-unknown-linux-gnu
-      - name: Create release archive
+      - name: Create Linux release archive
         run: |
           mkdir -p release
           cp target/x86_64-unknown-linux-gnu/release/agentry release/agentry-x86_64-unknown-linux-gnu
           chmod +x release/*
-      - name: Upload artifacts
+          cd release && tar czf agentry-linux.tar.gz agentry-*
+      - name: Upload Linux release
         uses: actions/upload-artifact@v4
         with:
-          name: agentry-release-linux
-          path: release/
+          name: agentry-linux
+          path: release/agentry-linux.tar.gz
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/agentry-linux.tar.gz
+          generate_release_notes: true
