@@ -14,3 +14,4 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 chrono = { workspace = true }
+sha1 = { workspace = true }

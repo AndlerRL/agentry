@@ -223,11 +223,17 @@ mod tests {
 
     #[test]
     fn test_skill_hub_loads_installed() {
-        let home = PathBuf::from(std::env::var("HOME").unwrap_or("/tmp".into()));
-        let hub = SkillHub::load(&home, &[]).unwrap();
-        // Should find skills from the real lockfile
-        assert!(hub.installed_count() > 0, "Should find installed skills from real lockfile");
+        // Use a temp dir so the test works on CI where there's no lockfile
+        let tmp = std::env::temp_dir().join("agentry_test_hub_load");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        // With no lockfile, hub should have 0 skills but known sources
+        let hub = SkillHub::load(&tmp, &[]).unwrap();
+        assert_eq!(hub.installed_count(), 0);
         assert!(!hub.sources.is_empty());
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -237,9 +243,12 @@ mod tests {
 
     #[test]
     fn test_custom_sources() {
-        let home = PathBuf::from(std::env::var("HOME").unwrap_or("/tmp".into()));
+        let tmp = std::env::temp_dir().join("agentry_test_hub_custom");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
         let custom = vec!["my-org/custom-skills".to_string()];
-        let hub = SkillHub::load(&home, &custom).unwrap();
+        let hub = SkillHub::load(&tmp, &custom).unwrap();
         assert!(hub.sources.iter().any(|s| s.name == "my-org/custom-skills" && s.is_custom));
     }
 }
