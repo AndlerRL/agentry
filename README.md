@@ -1,3 +1,31 @@
+
+<pre>
+
+████████████████████████████████████████████████████████████████████████████████████████████
+█▌                                                                                        ▐█
+█▌                                                                                        ▐█
+█▌                                                                                        ▐█
+█▌                                                     I8                                 ▐█
+█▌                                                     I8                                 ▐█
+█▌                                                   88888888                             ▐█
+█▌                                                     I8                                 ▐█
+█▌       ,gggg,gg    ,gggg,gg   ,ggg,    ,ggg,,ggg,    I8    ,gggggg,  gg     gg          ▐█
+█▌      dP"  "Y8I   dP"  "Y8I  i8" "8i  ,8" "8P" "8,   I8    dP""""8I  I8     8I          ▐█
+█▌     i8'    ,8I  i8'    ,8I  I8, ,8I  I8   8I   8I  ,I8,  ,8'    8I  I8,   ,8I          ▐█
+█▌    ,d8,   ,d8b,,d8,   ,d8I  'YbadP' ,dP   8I   Yb,,d88b,,dP     Y8,,d8b, ,d8I          ▐█
+█▌    P"Y8888P"'Y8P"Y8888P"888888P"Y8888P'   8I   'Y88P""Y88P      'Y8P""Y88P"888         ▐█
+█▌                       ,d8I'                                              ,d8I'         ▐█
+█▌                     ,dP'8I                                             ,dP'8I          ▐█
+█▌                    ,8"  8I                                            ,8"  8I          ▐█
+█▌                    I8   8I                                            I8   8I          ▐█
+█▌                    '8, ,8I                                            '8, ,8I          ▐█
+█▌                     'Y8P"                                              'Y8P"           ▐█
+█▌                                                                                        ▐█
+█▌                                                                                        ▐█
+█▌                                                                                        ▐█
+████████████████████████████████████████████████████████████████████████████████████████████
+</pre>
+
 # agentry — The Multi-Agent Prompt Manager
 
 [![Crates.io](https://img.shields.io/crates/v/agentry-tui.svg)](https://crates.io/crates/agentry-tui)
