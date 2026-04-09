@@ -13,7 +13,7 @@ pub struct SkillLockfile {
     pub skills: BTreeMap<String, SkillLockEntry>,
     #[serde(default)]
     pub dismissed: BTreeMap<String, serde_json::Value>,
-    #[serde(default)]
+    #[serde(default, rename = "lastSelectedAgents")]
     pub last_selected_agents: Vec<String>,
 }
 
@@ -21,6 +21,7 @@ pub struct SkillLockfile {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillLockEntry {
     pub source: String,
+    #[serde(rename = "sourceType")]
     pub source_type: String,
     #[serde(rename = "sourceUrl")]
     pub source_url: String,
