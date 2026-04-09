@@ -66,9 +66,7 @@ pub async fn detect_all_agents() -> Vec<DetectedAgent> {
     // Run detection in parallel using tokio tasks
     let handles: Vec<_> = specs
         .into_iter()
-        .map(|spec| {
-            tokio::task::spawn_blocking(move || detect_agent(&spec))
-        })
+        .map(|spec| tokio::task::spawn_blocking(move || detect_agent(&spec)))
         .collect();
 
     let mut results = Vec::new();
@@ -81,7 +79,9 @@ pub async fn detect_all_agents() -> Vec<DetectedAgent> {
 
     // Sort: installed first, then by name
     results.sort_by(|a, b| {
-        b.installed.cmp(&a.installed).then(a.spec.name.cmp(&b.spec.name))
+        b.installed
+            .cmp(&a.installed)
+            .then(a.spec.name.cmp(&b.spec.name))
     });
 
     results
@@ -105,10 +105,7 @@ fn which_binary(name: &str) -> bool {
 
 /// Try to get the version of a CLI binary.
 fn get_version(binary: &str) -> Option<String> {
-    let output = Command::new(binary)
-        .arg("--version")
-        .output()
-        .ok()?;
+    let output = Command::new(binary).arg("--version").output().ok()?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     // Take first line, extract version-like substring
@@ -153,11 +150,7 @@ fn list_skills(skills_dir: &Path) -> Vec<String> {
             entries
                 .filter_map(|e| e.ok())
                 .filter(|e| e.path().is_dir() || e.path().is_symlink())
-                .filter_map(|e| {
-                    e.file_name()
-                        .to_str()
-                        .map(|s| s.to_string())
-                })
+                .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
                 .collect()
         })
         .unwrap_or_default()

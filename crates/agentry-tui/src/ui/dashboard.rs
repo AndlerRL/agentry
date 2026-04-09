@@ -6,17 +6,17 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::App;
 use super::Tab;
+use crate::app::App;
 
 pub fn draw_dashboard(f: &mut Frame, app: &App) {
     let size = f.area();
 
     // Layout: top tabs | main content (left + right) | bottom status
     let chunks = Layout::vertical([
-        Constraint::Length(3),   // tabs
-        Constraint::Min(10),     // main content
-        Constraint::Length(1),   // status bar
+        Constraint::Length(3), // tabs
+        Constraint::Min(10),   // main content
+        Constraint::Length(1), // status bar
     ])
     .split(size);
 
@@ -33,7 +33,11 @@ pub fn draw_dashboard(f: &mut Frame, app: &App) {
     let tabs = Tabs::new(tab_titles)
         .block(Block::default().borders(Borders::BOTTOM))
         .select(app.tab_index)
-        .highlight_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+        .highlight_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
     f.render_widget(tabs, chunks[0]);
 
     // Main content area split into left (list) and right (detail)
@@ -66,7 +70,10 @@ pub fn draw_dashboard(f: &mut Frame, app: &App) {
     }
 
     // Status bar
-    let status = app.status_message.as_deref().unwrap_or("j/k:navigate  Tab:next-tab  s:sync  q:quit  ?:help");
+    let status = app
+        .status_message
+        .as_deref()
+        .unwrap_or("j/k:navigate  Tab:next-tab  s:sync  q:quit  ?:help");
     let status_bar = Paragraph::new(Line::from(Span::styled(
         format!(" {}", status),
         Style::default().fg(Color::DarkGray),
@@ -84,7 +91,11 @@ fn draw_agents_list(f: &mut Frame, app: &App, area: Rect) {
         .detected_agents
         .iter()
         .map(|agent| {
-            let status_color = if agent.installed { Color::Green } else { Color::Red };
+            let status_color = if agent.installed {
+                Color::Green
+            } else {
+                Color::Red
+            };
             let version = agent.version.as_deref().unwrap_or("---");
             let line = Line::from(vec![
                 Span::styled(
@@ -133,7 +144,9 @@ fn draw_agent_detail(f: &mut Frame, app: &App, area: Rect) {
         let mut lines = vec![
             Line::from(Span::styled(
                 format!(" {} ", agent.spec.name),
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
             Line::from(vec![
@@ -146,7 +159,10 @@ fn draw_agent_detail(f: &mut Frame, app: &App, area: Rect) {
             ]),
             Line::from(vec![
                 Span::styled("  Format:   ", Style::default().fg(Color::Yellow)),
-                Span::styled(format!("{}", agent.spec.prompt_format), Style::default().fg(Color::White)),
+                Span::styled(
+                    format!("{}", agent.spec.prompt_format),
+                    Style::default().fg(Color::White),
+                ),
             ]),
         ];
 
@@ -154,7 +170,11 @@ fn draw_agent_detail(f: &mut Frame, app: &App, area: Rect) {
             lines.push(Line::from(vec![
                 Span::styled("  Skills:   ", Style::default().fg(Color::Yellow)),
                 Span::styled(
-                    format!("{} ({} installed)", skills_dir.display(), agent.installed_skills.len()),
+                    format!(
+                        "{} ({} installed)",
+                        skills_dir.display(),
+                        agent.installed_skills.len()
+                    ),
                     Style::default().fg(Color::White),
                 ),
             ]));
@@ -217,14 +237,18 @@ fn draw_prompts_list(f: &mut Frame, app: &App, area: Rect) {
     let mut items: Vec<ListItem> = Vec::new();
 
     // Global prompts
-    let global_prompts: Vec<_> = app.prompts.iter()
+    let global_prompts: Vec<_> = app
+        .prompts
+        .iter()
         .filter(|p| matches!(p.scope, agentry_core::models::PromptScope::Global))
         .collect();
 
     if !global_prompts.is_empty() {
         items.push(ListItem::new(Line::from(Span::styled(
             " Global Prompts",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         ))));
         for prompt in &global_prompts {
             let selected = app.list_selected < app.prompts.len()
@@ -237,14 +261,18 @@ fn draw_prompts_list(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // Project prompts
-    let project_prompts: Vec<_> = app.prompts.iter()
+    let project_prompts: Vec<_> = app
+        .prompts
+        .iter()
         .filter(|p| matches!(p.scope, agentry_core::models::PromptScope::Project { .. }))
         .collect();
 
     if !project_prompts.is_empty() {
         items.push(ListItem::new(Line::from(Span::styled(
             " Project Prompts",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         ))));
         for prompt in &project_prompts {
             let scope_label = match &prompt.scope {
@@ -295,7 +323,9 @@ fn draw_prompt_detail(f: &mut Frame, app: &App, area: Rect) {
         let mut lines = vec![
             Line::from(Span::styled(
                 format!(" {} ", prompt.name),
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
             Line::from(vec![
@@ -304,12 +334,19 @@ fn draw_prompt_detail(f: &mut Frame, app: &App, area: Rect) {
             ]),
             Line::from(vec![
                 Span::styled("  Format:   ", Style::default().fg(Color::Yellow)),
-                Span::styled(format!("{}", prompt.source_format), Style::default().fg(Color::White)),
+                Span::styled(
+                    format!("{}", prompt.source_format),
+                    Style::default().fg(Color::White),
+                ),
             ]),
             Line::from(vec![
                 Span::styled("  File:     ", Style::default().fg(Color::Yellow)),
                 Span::styled(
-                    prompt.source_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+                    prompt
+                        .source_path
+                        .as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default(),
                     Style::default().fg(Color::DarkGray),
                 ),
             ]),
@@ -345,9 +382,18 @@ fn draw_prompt_detail(f: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(Color::DarkGray),
             )),
             Line::from(""),
-            Line::from(Span::styled("  n: New prompt", Style::default().fg(Color::Yellow))),
-            Line::from(Span::styled("  e: Edit prompt", Style::default().fg(Color::Yellow))),
-            Line::from(Span::styled("  d: Delete prompt", Style::default().fg(Color::Yellow))),
+            Line::from(Span::styled(
+                "  n: New prompt",
+                Style::default().fg(Color::Yellow),
+            )),
+            Line::from(Span::styled(
+                "  e: Edit prompt",
+                Style::default().fg(Color::Yellow),
+            )),
+            Line::from(Span::styled(
+                "  d: Delete prompt",
+                Style::default().fg(Color::Yellow),
+            )),
         ]
     };
 
@@ -360,6 +406,7 @@ fn draw_prompt_detail(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(paragraph, area);
 }
 
+#[allow(dead_code)]
 fn draw_prompts_detail_placeholder(f: &mut Frame, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
@@ -437,7 +484,12 @@ fn draw_openclaw_detail_placeholder(f: &mut Frame, area: Rect) {
 
 fn draw_help(f: &mut Frame, area: Rect) {
     let help_text = vec![
-        Line::from(Span::styled(" agentry — Keybindings ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            " agentry — Keybindings ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
         Line::from(""),
         Line::from(vec![
             Span::styled("  j/k, ↑/↓  ", Style::default().fg(Color::Yellow)),
@@ -484,7 +536,10 @@ fn draw_help(f: &mut Frame, area: Rect) {
             Span::raw("Quit"),
         ]),
         Line::from(""),
-        Line::from(Span::styled("  Press ? or Esc to close", Style::default().fg(Color::DarkGray))),
+        Line::from(Span::styled(
+            "  Press ? or Esc to close",
+            Style::default().fg(Color::DarkGray),
+        )),
     ];
 
     let block = Block::default()

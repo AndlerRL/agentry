@@ -5,7 +5,12 @@ use std::collections::BTreeMap;
 pub trait FormatConverter {
     fn format(&self) -> PromptFormat;
     /// Parse raw file content into a UnifiedPrompt.
-    fn parse(&self, name: &str, content: &str, path: Option<std::path::PathBuf>) -> anyhow::Result<UnifiedPrompt>;
+    fn parse(
+        &self,
+        name: &str,
+        content: &str,
+        path: Option<std::path::PathBuf>,
+    ) -> anyhow::Result<UnifiedPrompt>;
     /// Serialize a UnifiedPrompt into this format's file content.
     fn serialize(&self, prompt: &UnifiedPrompt) -> anyhow::Result<String>;
 }
@@ -19,7 +24,12 @@ impl FormatConverter for PlainMarkdownConverter {
         PromptFormat::PlainMd
     }
 
-    fn parse(&self, name: &str, content: &str, path: Option<std::path::PathBuf>) -> anyhow::Result<UnifiedPrompt> {
+    fn parse(
+        &self,
+        name: &str,
+        content: &str,
+        path: Option<std::path::PathBuf>,
+    ) -> anyhow::Result<UnifiedPrompt> {
         Ok(UnifiedPrompt {
             id: name.to_string(),
             name: name.to_string(),
@@ -47,7 +57,12 @@ impl FormatConverter for FrontmatterMdConverter {
         PromptFormat::FrontmatterMd
     }
 
-    fn parse(&self, name: &str, content: &str, path: Option<std::path::PathBuf>) -> anyhow::Result<UnifiedPrompt> {
+    fn parse(
+        &self,
+        name: &str,
+        content: &str,
+        path: Option<std::path::PathBuf>,
+    ) -> anyhow::Result<UnifiedPrompt> {
         let (frontmatter, body) = parse_frontmatter(content)?;
 
         let description = frontmatter
@@ -73,7 +88,10 @@ impl FormatConverter for FrontmatterMdConverter {
         let mut out = String::from("---\n");
         // Always write name and description in frontmatter
         let mut fm = prompt.frontmatter.clone();
-        fm.insert("name".to_string(), serde_yaml::Value::String(prompt.name.clone()));
+        fm.insert(
+            "name".to_string(),
+            serde_yaml::Value::String(prompt.name.clone()),
+        );
         if !prompt.description.is_empty() {
             fm.insert(
                 "description".to_string(),
@@ -96,7 +114,12 @@ impl FormatConverter for MdcConverter {
         PromptFormat::Mdc
     }
 
-    fn parse(&self, name: &str, content: &str, path: Option<std::path::PathBuf>) -> anyhow::Result<UnifiedPrompt> {
+    fn parse(
+        &self,
+        name: &str,
+        content: &str,
+        path: Option<std::path::PathBuf>,
+    ) -> anyhow::Result<UnifiedPrompt> {
         // MDC files have --- frontmatter --- but with different fields (globs, description)
         let (frontmatter, body) = parse_frontmatter(content)?;
         let description = frontmatter
@@ -120,7 +143,10 @@ impl FormatConverter for MdcConverter {
 
     fn serialize(&self, prompt: &UnifiedPrompt) -> anyhow::Result<String> {
         let mut fm = prompt.frontmatter.clone();
-        fm.insert("description".to_string(), serde_yaml::Value::String(prompt.description.clone()));
+        fm.insert(
+            "description".to_string(),
+            serde_yaml::Value::String(prompt.description.clone()),
+        );
         let mut out = String::from("---\n");
         out.push_str(&serde_yaml::to_string(&fm)?);
         out.push_str("---\n\n");
@@ -138,7 +164,12 @@ impl FormatConverter for XmlTagMdConverter {
         PromptFormat::XmlTagMd
     }
 
-    fn parse(&self, name: &str, content: &str, path: Option<std::path::PathBuf>) -> anyhow::Result<UnifiedPrompt> {
+    fn parse(
+        &self,
+        name: &str,
+        content: &str,
+        path: Option<std::path::PathBuf>,
+    ) -> anyhow::Result<UnifiedPrompt> {
         // May have frontmatter + XML tags in body
         let (frontmatter, body) = parse_frontmatter(content)?;
 
@@ -166,12 +197,21 @@ impl FormatConverter for XmlTagMdConverter {
 
     fn serialize(&self, prompt: &UnifiedPrompt) -> anyhow::Result<String> {
         let mut out = String::new();
-        if !prompt.frontmatter.is_empty() || !prompt.description.is_empty() || !prompt.name.is_empty() {
+        if !prompt.frontmatter.is_empty()
+            || !prompt.description.is_empty()
+            || !prompt.name.is_empty()
+        {
             out.push_str("---\n");
             let mut fm = prompt.frontmatter.clone();
-            fm.insert("name".to_string(), serde_yaml::Value::String(prompt.name.clone()));
+            fm.insert(
+                "name".to_string(),
+                serde_yaml::Value::String(prompt.name.clone()),
+            );
             if !prompt.description.is_empty() {
-                fm.insert("description".to_string(), serde_yaml::Value::String(prompt.description.clone()));
+                fm.insert(
+                    "description".to_string(),
+                    serde_yaml::Value::String(prompt.description.clone()),
+                );
             }
             out.push_str(&serde_yaml::to_string(&fm)?);
             out.push_str("---\n\n");
@@ -179,7 +219,12 @@ impl FormatConverter for XmlTagMdConverter {
 
         // Wrap body in XML tags
         if let Some(tag) = prompt.xml_tags.first() {
-            out.push_str(&format!("<{}>\n{}\n</{}>\n", tag.tag, prompt.body.trim(), tag.tag));
+            out.push_str(&format!(
+                "<{}>\n{}\n</{}>\n",
+                tag.tag,
+                prompt.body.trim(),
+                tag.tag
+            ));
         } else {
             out.push_str(&prompt.body);
         }
@@ -196,7 +241,12 @@ impl FormatConverter for LobsterYamlConverter {
         PromptFormat::LobsterYaml
     }
 
-    fn parse(&self, name: &str, content: &str, path: Option<std::path::PathBuf>) -> anyhow::Result<UnifiedPrompt> {
+    fn parse(
+        &self,
+        name: &str,
+        content: &str,
+        path: Option<std::path::PathBuf>,
+    ) -> anyhow::Result<UnifiedPrompt> {
         let yaml: serde_yaml::Value = serde_yaml::from_str(content)?;
         let mut frontmatter = BTreeMap::new();
 
@@ -236,7 +286,9 @@ impl FormatConverter for LobsterYamlConverter {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /// Parse frontmatter from a string. Returns (frontmatter_map, remaining_body).
-fn parse_frontmatter(content: &str) -> anyhow::Result<(BTreeMap<String, serde_yaml::Value>, String)> {
+fn parse_frontmatter(
+    content: &str,
+) -> anyhow::Result<(BTreeMap<String, serde_yaml::Value>, String)> {
     let trimmed = content.trim_start();
     if !trimmed.starts_with("---") {
         return Ok((BTreeMap::new(), content.to_string()));
@@ -251,7 +303,11 @@ fn parse_frontmatter(content: &str) -> anyhow::Result<(BTreeMap<String, serde_ya
     if let Some(close_offset) = remaining.find("\n---") {
         let fm_content = &remaining[..close_offset];
         let body_start = close_offset + 4; // skip \n---
-        let body = remaining.get(body_start..).unwrap_or("").trim_start().to_string();
+        let body = remaining
+            .get(body_start..)
+            .unwrap_or("")
+            .trim_start()
+            .to_string();
 
         let fm: BTreeMap<String, serde_yaml::Value> = serde_yaml::from_str(fm_content)?;
         Ok((fm, body))
@@ -343,7 +399,9 @@ mod tests {
     fn test_frontmatter_md_parse() {
         let content = "---\nname: software-architect\ndescription: A prompt\ninvokable: true\n---\n\nYou are an architect.\n";
         let converter = FrontmatterMdConverter;
-        let prompt = converter.parse("software-architect", content, None).unwrap();
+        let prompt = converter
+            .parse("software-architect", content, None)
+            .unwrap();
         assert_eq!(prompt.name, "software-architect");
         assert_eq!(prompt.description, "A prompt");
         assert!(prompt.body.contains("You are an architect"));
@@ -373,7 +431,8 @@ mod tests {
 
     #[test]
     fn test_xml_tag_parse() {
-        let content = "---\nname: test\n---\n\n<expertise>\nYou are a senior developer.\n</expertise>\n";
+        let content =
+            "---\nname: test\n---\n\n<expertise>\nYou are a senior developer.\n</expertise>\n";
         let converter = XmlTagMdConverter;
         let prompt = converter.parse("test", content, None).unwrap();
         assert_eq!(prompt.xml_tags.len(), 1);
@@ -385,7 +444,9 @@ mod tests {
     fn test_xml_tag_roundtrip() {
         let content = "---\nname: software-architect\ndescription: Software Architect prompt\ninvokable: true\n---\n\n<expertise>\nYou are a senior software architect.\n</expertise>\n";
         let converter = XmlTagMdConverter;
-        let prompt = converter.parse("software-architect", content, None).unwrap();
+        let prompt = converter
+            .parse("software-architect", content, None)
+            .unwrap();
         assert_eq!(prompt.xml_tags.len(), 1);
         let serialized = converter.serialize(&prompt).unwrap();
         assert!(serialized.contains("<expertise>"));

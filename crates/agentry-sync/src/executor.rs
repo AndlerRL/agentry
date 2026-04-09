@@ -24,11 +24,7 @@ pub fn execute_sync(
 }
 
 /// Execute a single sync mapping.
-fn execute_mapping(
-    prompt: &UnifiedPrompt,
-    mapping: &SyncMapping,
-    dry_run: bool,
-) -> SyncResult {
+fn execute_mapping(prompt: &UnifiedPrompt, mapping: &SyncMapping, dry_run: bool) -> SyncResult {
     match mapping.action {
         SyncAction::Skip => SyncResult {
             mapping: mapping.clone(),
@@ -46,11 +42,7 @@ fn execute_mapping(
 }
 
 /// Copy a prompt to the destination with format conversion.
-fn copy_prompt(
-    prompt: &UnifiedPrompt,
-    mapping: &SyncMapping,
-    dry_run: bool,
-) -> SyncResult {
+fn copy_prompt(prompt: &UnifiedPrompt, mapping: &SyncMapping, dry_run: bool) -> SyncResult {
     // Convert prompt to target format
     let content = match convert_to(prompt, mapping.target_format) {
         Ok(c) => c,
@@ -153,8 +145,15 @@ fn symlink_prompt(mapping: &SyncMapping, dry_run: bool) -> SyncResult {
 
     // Compute relative path
     // Default pattern: ../../.agents/skills/<name>
-    let link_target = mapping.destination.file_name()
-        .and_then(|n| Path::new("../../.agents/skills/").join(n).to_str().map(String::from))
+    let link_target = mapping
+        .destination
+        .file_name()
+        .and_then(|n| {
+            Path::new("../../.agents/skills/")
+                .join(n)
+                .to_str()
+                .map(String::from)
+        })
         .unwrap_or_else(|| "../.agents/skills/".to_string());
 
     #[cfg(unix)]

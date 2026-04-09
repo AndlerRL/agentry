@@ -14,7 +14,9 @@ pub fn discover_prompts(home_dir: &Path, project_dirs: &[PathBuf]) -> Vec<Unifie
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().map(|e| e == "md").unwrap_or(false) {
-                    if let Some(prompt) = load_prompt_file(&path, PromptFormat::PlainMd, PromptScope::Global) {
+                    if let Some(prompt) =
+                        load_prompt_file(&path, PromptFormat::PlainMd, PromptScope::Global)
+                    {
                         prompts.push(prompt);
                     }
                 }
@@ -29,7 +31,9 @@ pub fn discover_prompts(home_dir: &Path, project_dirs: &[PathBuf]) -> Vec<Unifie
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().map(|e| e == "md").unwrap_or(false) {
-                    if let Some(prompt) = load_prompt_file(&path, PromptFormat::XmlTagMd, PromptScope::Global) {
+                    if let Some(prompt) =
+                        load_prompt_file(&path, PromptFormat::XmlTagMd, PromptScope::Global)
+                    {
                         prompts.push(prompt);
                     }
                 }
@@ -44,7 +48,9 @@ pub fn discover_prompts(home_dir: &Path, project_dirs: &[PathBuf]) -> Vec<Unifie
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().map(|e| e == "md").unwrap_or(false) {
-                    if let Some(prompt) = load_prompt_file(&path, PromptFormat::XmlTagMd, PromptScope::Global) {
+                    if let Some(prompt) =
+                        load_prompt_file(&path, PromptFormat::XmlTagMd, PromptScope::Global)
+                    {
                         prompts.push(prompt);
                     }
                 }
@@ -55,7 +61,9 @@ pub fn discover_prompts(home_dir: &Path, project_dirs: &[PathBuf]) -> Vec<Unifie
     // 4. ~/.claude/CLAUDE.md — Claude global prompt (Plain MD)
     let claude_md = home_dir.join(".claude").join("CLAUDE.md");
     if claude_md.exists() {
-        if let Some(prompt) = load_prompt_file(&claude_md, PromptFormat::PlainMd, PromptScope::Global) {
+        if let Some(prompt) =
+            load_prompt_file(&claude_md, PromptFormat::PlainMd, PromptScope::Global)
+        {
             prompts.push(prompt);
         }
     }
@@ -63,7 +71,9 @@ pub fn discover_prompts(home_dir: &Path, project_dirs: &[PathBuf]) -> Vec<Unifie
     // 5. ~/.gemini/GEMINI.md — Gemini global prompt
     let gemini_md = home_dir.join(".gemini").join("GEMINI.md");
     if gemini_md.exists() {
-        if let Some(prompt) = load_prompt_file(&gemini_md, PromptFormat::PlainMd, PromptScope::Global) {
+        if let Some(prompt) =
+            load_prompt_file(&gemini_md, PromptFormat::PlainMd, PromptScope::Global)
+        {
             prompts.push(prompt);
         }
     }
@@ -96,7 +106,11 @@ pub fn discover_prompts(home_dir: &Path, project_dirs: &[PathBuf]) -> Vec<Unifie
 }
 
 /// Load a single prompt file from disk.
-fn load_prompt_file(path: &Path, format: PromptFormat, scope: PromptScope) -> Option<UnifiedPrompt> {
+fn load_prompt_file(
+    path: &Path,
+    format: PromptFormat,
+    scope: PromptScope,
+) -> Option<UnifiedPrompt> {
     let content = std::fs::read_to_string(path).ok()?;
     let name = path.file_stem()?.to_str()?.to_string();
 
@@ -104,7 +118,9 @@ fn load_prompt_file(path: &Path, format: PromptFormat, scope: PromptScope) -> Op
     let detected_format = detect_format(&content, format);
     let converter = converter_for(detected_format);
 
-    let mut prompt = converter.parse(&name, &content, Some(path.to_path_buf())).ok()?;
+    let mut prompt = converter
+        .parse(&name, &content, Some(path.to_path_buf()))
+        .ok()?;
     prompt.scope = scope;
     prompt.source_format = detected_format;
 
@@ -125,7 +141,10 @@ fn detect_format(content: &str, fallback: PromptFormat) -> PromptFormat {
     // If it starts with ---, it has frontmatter
     if trimmed.starts_with("---") {
         // Check if it contains XML tags in the body
-        if content.contains("<expertise>") || content.contains("<base_rules>") || content.contains("<rules>") {
+        if content.contains("<expertise>")
+            || content.contains("<base_rules>")
+            || content.contains("<rules>")
+        {
             return PromptFormat::XmlTagMd;
         }
         // If it has "globs:" in frontmatter, it's MDC
@@ -173,7 +192,10 @@ mod tests {
 
     #[test]
     fn test_detect_format_plain() {
-        assert_eq!(detect_format("# Hello\n\nWorld", PromptFormat::PlainMd), PromptFormat::PlainMd);
+        assert_eq!(
+            detect_format("# Hello\n\nWorld", PromptFormat::PlainMd),
+            PromptFormat::PlainMd
+        );
     }
 
     #[test]
@@ -187,7 +209,10 @@ mod tests {
     #[test]
     fn test_detect_format_xml_tag() {
         assert_eq!(
-            detect_format("---\nname: test\n---\n\n<expertise>\nHello\n</expertise>", PromptFormat::PlainMd),
+            detect_format(
+                "---\nname: test\n---\n\n<expertise>\nHello\n</expertise>",
+                PromptFormat::PlainMd
+            ),
             PromptFormat::XmlTagMd
         );
     }
@@ -195,7 +220,10 @@ mod tests {
     #[test]
     fn test_detect_format_mdc() {
         assert_eq!(
-            detect_format("---\nglobs: \"**/*.ts\"\n---\n\nUse strict TS", PromptFormat::PlainMd),
+            detect_format(
+                "---\nglobs: \"**/*.ts\"\n---\n\nUse strict TS",
+                PromptFormat::PlainMd
+            ),
             PromptFormat::Mdc
         );
     }

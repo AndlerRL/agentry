@@ -1,7 +1,7 @@
-pub mod models;
-pub mod format;
 pub mod discovery;
+pub mod format;
+pub mod models;
 
-pub use models::*;
-pub use format::*;
 pub use discovery::*;
+pub use format::*;
+pub use models::*;

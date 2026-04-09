@@ -76,7 +76,10 @@ impl App {
         }
     }
 
-    pub async fn run<B: Backend + std::io::Write>(&mut self, terminal: &mut Terminal<B>) -> Result<()> {
+    pub async fn run<B: Backend + std::io::Write>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+    ) -> Result<()> {
         // Run intro animation with agent detection
         self.run_intro(terminal).await?;
 
@@ -110,7 +113,10 @@ impl App {
         self.prompts = agentry_core::discover_prompts(&self.home_dir, &project_dirs);
     }
 
-    async fn run_intro<B: Backend + std::io::Write>(&mut self, terminal: &mut Terminal<B>) -> Result<()> {
+    async fn run_intro<B: Backend + std::io::Write>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+    ) -> Result<()> {
         // Animate intro while detecting agents in background
         let agents = agentry_agents::detect_all_agents().await;
         self.detected_agents = agents;
@@ -152,16 +158,10 @@ impl App {
         // If in editor mode, forward keys to editor
         if self.mode == AppMode::Editor {
             if let Some(ref mut editor) = self.editor {
-                match key.code {
-                    KeyCode::Esc => {
-                        if editor.mode == crate::editor::EditorMode::Normal {
-                            // Exit editor back to dashboard
-                            self.mode = AppMode::Dashboard;
-                            self.editor = None;
-                            return Ok(());
-                        }
-                    }
-                    _ => {}
+                if key.code == KeyCode::Esc && editor.mode == crate::editor::EditorMode::Normal {
+                    self.mode = AppMode::Dashboard;
+                    self.editor = None;
+                    return Ok(());
                 }
                 editor.handle_key(key);
                 // Check for :wq command (save and quit)
@@ -169,9 +169,10 @@ impl App {
                     if msg == "Saved." {
                         // Save the prompt content
                         if let Some(path) = editor.filename.clone() {
-                            let content = editor.buffer.to_string();
+                            let content = editor.buffer.content();
                             // Write to the prompt's source path or canonical store
-                            let save_path = self.home_dir.join(".agents").join("prompts").join(&path);
+                            let save_path =
+                                self.home_dir.join(".agents").join("prompts").join(&path);
                             if let Some(parent) = save_path.parent() {
                                 let _ = std::fs::create_dir_all(parent);
                             }
@@ -289,7 +290,11 @@ impl App {
     }
 
     fn prev_tab(&mut self) {
-        self.tab_index = if self.tab_index == 0 { 5 } else { self.tab_index - 1 };
+        self.tab_index = if self.tab_index == 0 {
+            5
+        } else {
+            self.tab_index - 1
+        };
         self.list_selected = 0;
     }
 

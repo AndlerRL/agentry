@@ -1,7 +1,7 @@
 mod app;
-mod ui;
-mod event;
 mod editor;
+mod event;
+mod ui;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -90,7 +90,11 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Some(Commands::Detect) => cmd_detect().await,
-        Some(Commands::Sync { prompt, all, dry_run }) => cmd_sync(prompt, all, dry_run).await,
+        Some(Commands::Sync {
+            prompt,
+            all,
+            dry_run,
+        }) => cmd_sync(prompt, all, dry_run).await,
         Some(Commands::Skills { action }) => cmd_skills(action).await,
         Some(Commands::Prompts { action }) => cmd_prompts(action).await,
         Some(Commands::Openclaw { action }) => cmd_openclaw(action).await,
@@ -147,7 +151,9 @@ async fn cmd_sync(prompt_name: Option<String>, all: bool, dry_run: bool) -> Resu
     use agentry_sync::executor::execute_sync;
     use agentry_sync::planner::plan_sync;
 
-    let home = std::env::var("HOME").map(std::path::PathBuf::from).unwrap_or_default();
+    let home = std::env::var("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default();
     let project_dirs = vec![home.join("Development")];
 
     let agents = agentry_agents::detect_all_agents().await;
@@ -172,7 +178,10 @@ async fn cmd_sync(prompt_name: Option<String>, all: bool, dry_run: bool) -> Resu
         let results = execute_sync(prompt, &plan.mappings, dry_run);
         for result in &results {
             let icon = if result.success { "✓" } else { "✗" };
-            println!("  {} {} → {}", icon, result.mapping.agent_id, result.message);
+            println!(
+                "  {} {} → {}",
+                icon, result.mapping.agent_id, result.message
+            );
         }
     }
 
@@ -185,7 +194,10 @@ async fn cmd_skills(action: Option<SkillsCommands>) -> Result<()> {
             println!("Skills list — not yet implemented (Phase 4)");
         }
         Some(SkillsCommands::Install { name }) => {
-            println!("Installing skill '{}' — not yet implemented (Phase 4)", name);
+            println!(
+                "Installing skill '{}' — not yet implemented (Phase 4)",
+                name
+            );
         }
         Some(SkillsCommands::Update) => {
             println!("Updating skills — not yet implemented (Phase 4)");
@@ -203,7 +215,9 @@ async fn cmd_skills(action: Option<SkillsCommands>) -> Result<()> {
 async fn cmd_prompts(action: Option<PromptsCommands>) -> Result<()> {
     use agentry_core::discovery::discover_prompts;
 
-    let home = std::env::var("HOME").map(std::path::PathBuf::from).unwrap_or_default();
+    let home = std::env::var("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default();
     let project_dirs = vec![home.join("Development")];
 
     match action {
@@ -214,10 +228,16 @@ async fn cmd_prompts(action: Option<PromptsCommands>) -> Result<()> {
                 let scope = match &prompt.scope {
                     agentry_core::models::PromptScope::Global => "global".to_string(),
                     agentry_core::models::PromptScope::Project { root } => {
-                        format!("project:{}", root.file_name().unwrap_or_default().to_string_lossy())
+                        format!(
+                            "project:{}",
+                            root.file_name().unwrap_or_default().to_string_lossy()
+                        )
                     }
                 };
-                println!("  {:<30} {:<12} {}", prompt.name, prompt.source_format, scope);
+                println!(
+                    "  {:<30} {:<12} {}",
+                    prompt.name, prompt.source_format, scope
+                );
             }
         }
         Some(PromptsCommands::New { name }) => {

@@ -61,7 +61,7 @@ impl Editor {
         if self.undo_stack.len() >= self.max_undo {
             self.undo_stack.pop_front();
         }
-        self.undo_stack.push_back(self.buffer.to_string());
+        self.undo_stack.push_back(self.buffer.content());
     }
 
     /// Handle a key input in the current mode.
@@ -82,17 +82,44 @@ impl Editor {
 
         match (code, modifiers) {
             // Mode switches
-            (KeyCode::Char('i'), _) => { self.mode = EditorMode::Insert; }
-            (KeyCode::Char('a'), _) => { self.cursor.move_right(&self.buffer); self.mode = EditorMode::Insert; }
-            (KeyCode::Char('o'), _) => { self.push_undo(); self.buffer.insert_newline_below(self.cursor.row); self.cursor.move_down(); self.cursor.col = 0; self.mode = EditorMode::Insert; }
-            (KeyCode::Char('O'), _) => { self.push_undo(); self.buffer.insert_newline_above(self.cursor.row); self.cursor.col = 0; self.mode = EditorMode::Insert; }
-            (KeyCode::Char('v'), _) => { self.mode = EditorMode::Visual; }
-            (KeyCode::Char(':'), _) => { self.mode = EditorMode::Command; self.command_buf.clear(); }
-            (KeyCode::Char('/'), _) => { self.mode = EditorMode::Command; self.command_buf.clear(); self.command_buf.push('/'); }
+            (KeyCode::Char('i'), _) => {
+                self.mode = EditorMode::Insert;
+            }
+            (KeyCode::Char('a'), _) => {
+                self.cursor.move_right(&self.buffer);
+                self.mode = EditorMode::Insert;
+            }
+            (KeyCode::Char('o'), _) => {
+                self.push_undo();
+                self.buffer.insert_newline_below(self.cursor.row);
+                self.cursor.move_down();
+                self.cursor.col = 0;
+                self.mode = EditorMode::Insert;
+            }
+            (KeyCode::Char('O'), _) => {
+                self.push_undo();
+                self.buffer.insert_newline_above(self.cursor.row);
+                self.cursor.col = 0;
+                self.mode = EditorMode::Insert;
+            }
+            (KeyCode::Char('v'), _) => {
+                self.mode = EditorMode::Visual;
+            }
+            (KeyCode::Char(':'), _) => {
+                self.mode = EditorMode::Command;
+                self.command_buf.clear();
+            }
+            (KeyCode::Char('/'), _) => {
+                self.mode = EditorMode::Command;
+                self.command_buf.clear();
+                self.command_buf.push('/');
+            }
 
             // Motions
             (KeyCode::Char('h'), _) | (KeyCode::Left, _) => self.cursor.move_left(),
-            (KeyCode::Char('j'), _) | (KeyCode::Down, _) => self.cursor.move_down_within(&self.buffer),
+            (KeyCode::Char('j'), _) | (KeyCode::Down, _) => {
+                self.cursor.move_down_within(&self.buffer)
+            }
             (KeyCode::Char('k'), _) | (KeyCode::Up, _) => self.cursor.move_up_within(&self.buffer),
             (KeyCode::Char('l'), _) | (KeyCode::Right, _) => self.cursor.move_right(&self.buffer),
             (KeyCode::Char('w'), _) => self.cursor.move_word_forward(&self.buffer),
@@ -101,7 +128,10 @@ impl Editor {
             (KeyCode::Char('0'), _) | (KeyCode::Home, _) => self.cursor.col = 0,
             (KeyCode::Char('$'), _) => self.cursor.move_end_of_line(&self.buffer),
             (KeyCode::Char('G'), _) => self.cursor.move_last_line(&self.buffer),
-            (KeyCode::Char('g'), _) => { self.cursor.row = 0; self.cursor.col = 0; } // gg - simplified
+            (KeyCode::Char('g'), _) => {
+                self.cursor.row = 0;
+                self.cursor.col = 0;
+            } // gg - simplified
 
             // Editing
             (KeyCode::Char('x'), _) => {
@@ -147,10 +177,13 @@ impl Editor {
         use crossterm::event::KeyCode;
 
         match key.code {
-            KeyCode::Esc => { self.mode = EditorMode::Normal; }
+            KeyCode::Esc => {
+                self.mode = EditorMode::Normal;
+            }
             KeyCode::Enter => {
                 self.push_undo();
-                self.buffer.insert_newline_at(self.cursor.row, self.cursor.col);
+                self.buffer
+                    .insert_newline_at(self.cursor.row, self.cursor.col);
                 self.cursor.move_down();
                 self.cursor.col = 0;
                 self.modified = true;
@@ -158,7 +191,8 @@ impl Editor {
             KeyCode::Backspace => {
                 if self.cursor.col > 0 {
                     self.push_undo();
-                    self.buffer.delete_char_at(self.cursor.row, self.cursor.col - 1);
+                    self.buffer
+                        .delete_char_at(self.cursor.row, self.cursor.col - 1);
                     self.cursor.move_left();
                     self.modified = true;
                 } else if self.cursor.row > 0 {
@@ -172,14 +206,16 @@ impl Editor {
             }
             KeyCode::Char(c) => {
                 self.push_undo();
-                self.buffer.insert_char_at(self.cursor.row, self.cursor.col, c);
+                self.buffer
+                    .insert_char_at(self.cursor.row, self.cursor.col, c);
                 self.cursor.move_right(&self.buffer);
                 self.modified = true;
             }
             KeyCode::Tab => {
                 self.push_undo();
                 for _ in 0..4 {
-                    self.buffer.insert_char_at(self.cursor.row, self.cursor.col, ' ');
+                    self.buffer
+                        .insert_char_at(self.cursor.row, self.cursor.col, ' ');
                     self.cursor.col += 1;
                 }
                 self.modified = true;
@@ -190,16 +226,17 @@ impl Editor {
 
     fn handle_visual_key(&mut self, key: crossterm::event::KeyEvent) {
         use crossterm::event::KeyCode;
-        match key.code {
-            KeyCode::Esc => self.mode = EditorMode::Normal,
-            _ => {}
+        if key.code == KeyCode::Esc {
+            self.mode = EditorMode::Normal;
         }
     }
 
     fn handle_command_key(&mut self, key: crossterm::event::KeyEvent) {
         use crossterm::event::KeyCode;
         match key.code {
-            KeyCode::Esc => { self.mode = EditorMode::Normal; }
+            KeyCode::Esc => {
+                self.mode = EditorMode::Normal;
+            }
             KeyCode::Enter => {
                 self.execute_command(&self.command_buf.clone());
                 self.mode = EditorMode::Normal;
@@ -210,7 +247,9 @@ impl Editor {
                     self.mode = EditorMode::Normal;
                 }
             }
-            KeyCode::Char(c) => { self.command_buf.push(c); }
+            KeyCode::Char(c) => {
+                self.command_buf.push(c);
+            }
             _ => {}
         }
     }
@@ -219,8 +258,13 @@ impl Editor {
         let cmd = cmd.trim_start_matches(':').trim_start_matches('/');
         match cmd {
             "w" => self.save(),
-            "q" => { self.message = Some("Use Esc to exit editor".into()); }
-            "wq" => { self.save(); self.message = Some("Saved.".into()); }
+            "q" => {
+                self.message = Some("Use Esc to exit editor".into());
+            }
+            "wq" => {
+                self.save();
+                self.message = Some("Saved.".into());
+            }
             s if s.starts_with("s/") => {
                 // Simple :%s/old/new/ substitute
                 self.push_undo();
@@ -241,7 +285,13 @@ impl Editor {
     fn save(&mut self) {
         // In a real implementation, this would write to disk
         self.modified = false;
-        self.message = Some(format!("Saved{}", self.filename.as_ref().map(|f| format!(" {}", f)).unwrap_or_default()));
+        self.message = Some(format!(
+            "Saved{}",
+            self.filename
+                .as_ref()
+                .map(|f| format!(" {}", f))
+                .unwrap_or_default()
+        ));
     }
 
     fn substitute(&mut self, cmd: &str) -> Option<String> {
@@ -251,7 +301,7 @@ impl Editor {
         if parts.len() >= 3 {
             let find = parts.get(1)?;
             let replace = parts.get(2)?;
-            let content = self.buffer.to_string();
+            let content = self.buffer.content();
             let new_content = content.replace(find, replace);
             let count = content.matches(find).count();
             self.buffer = Buffer::from_content(&new_content);
@@ -305,6 +355,9 @@ impl Editor {
         let filename = self.filename.as_deref().unwrap_or("[No Name]");
         let line = self.cursor.row + 1;
         let col = self.cursor.col + 1;
-        format!("{} │ {}:{}{} │ L{},C{}", mode, filename, line, modified, line, col)
+        format!(
+            "{} │ {}:{}{} │ L{},C{}",
+            mode, filename, line, modified, line, col
+        )
     }
 }

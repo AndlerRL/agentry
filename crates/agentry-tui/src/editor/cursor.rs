@@ -24,6 +24,7 @@ impl Cursor {
         self.row += 1;
     }
 
+    #[allow(dead_code)]
     pub fn move_up(&mut self) {
         if self.row > 0 {
             self.row -= 1;
@@ -58,7 +59,7 @@ impl Cursor {
         let rest = &line[self.col.min(line.len())..];
         let mut chars = rest.char_indices().peekable();
         // Skip remaining chars of current word
-        while let Some((_, c)) = chars.next() {
+        for (_, c) in chars.by_ref() {
             if c.is_whitespace() {
                 break;
             }
@@ -70,7 +71,7 @@ impl Cursor {
                     chars.next();
                 }
                 Some(&(idx, _)) => {
-                    self.col = self.col + idx;
+                    self.col += idx;
                     return;
                 }
                 None => break,
@@ -116,7 +117,7 @@ impl Cursor {
             }
         }
         // Find end of word
-        while let Some((i, c)) = chars.next() {
+        for (i, c) in chars {
             if c.is_whitespace() {
                 self.col = i.saturating_sub(1);
                 found = true;

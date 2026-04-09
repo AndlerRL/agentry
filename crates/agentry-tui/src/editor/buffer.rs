@@ -19,7 +19,11 @@ impl Buffer {
             content.lines().map(String::from).collect()
         };
         // Ensure at least one line
-        let lines = if lines.is_empty() { vec![String::new()] } else { lines };
+        let lines = if lines.is_empty() {
+            vec![String::new()]
+        } else {
+            lines
+        };
         Self { lines }
     }
 
@@ -88,13 +92,13 @@ impl Buffer {
         }
     }
 
-    pub fn to_string(&self) -> String {
+    pub fn content(&self) -> String {
         self.lines.join("\n")
     }
 }
 
 impl std::fmt::Display for Buffer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_string())
+        write!(f, "{}", self.content())
     }
 }

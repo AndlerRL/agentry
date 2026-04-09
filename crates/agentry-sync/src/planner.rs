@@ -18,8 +18,7 @@ pub fn plan_sync(
             continue;
         }
 
-        let (action, dest_path, target_format) =
-            default_sync_action(prompt, &agent.spec, home_dir);
+        let (action, dest_path, target_format) = default_sync_action(prompt, &agent.spec, home_dir);
 
         mappings.push(SyncMapping {
             prompt_id: prompt.id.clone(),
@@ -51,14 +50,9 @@ fn default_sync_action(
     let config_dir = home_dir.join(&spec.config_dir);
 
     match spec.id.as_str() {
-        // Continue is often the source — skip syncing to it if it's the origin
+        // Continue is often the source — sync to prompts directory as XmlTagMd
         "continue" => {
-            // Sync to Continue prompts directory as FrontmatterMd
-            let dest = if prompt.source_format == PromptFormat::XmlTagMd {
-                config_dir.join("prompts").join(prompt.canonical_filename())
-            } else {
-                config_dir.join("prompts").join(prompt.canonical_filename())
-            };
+            let dest = config_dir.join("prompts").join(prompt.canonical_filename());
             (SyncAction::Copy, dest, PromptFormat::XmlTagMd)
         }
         // Claude Code — copy as PlainMd to ~/.claude/CLAUDE.md or project-level
@@ -88,7 +82,9 @@ fn default_sync_action(
         }
         // Firebender — copy as MDC
         "firebender" => {
-            let dest = config_dir.join("rules").join(format!("{}.mdc", prompt.name));
+            let dest = config_dir
+                .join("rules")
+                .join(format!("{}.mdc", prompt.name));
             (SyncAction::Copy, dest, PromptFormat::Mdc)
         }
         // OpenClaw — copy as PlainMd
@@ -137,7 +133,10 @@ pub fn project_sync_plans(
                     let dest = path.join("CLAUDE.md");
                     mappings.push(SyncMapping {
                         prompt_id: prompt.id.clone(),
-                        agent_id: format!("project:{}", path.file_name().unwrap_or_default().to_string_lossy()),
+                        agent_id: format!(
+                            "project:{}",
+                            path.file_name().unwrap_or_default().to_string_lossy()
+                        ),
                         destination: dest,
                         target_format: PromptFormat::PlainMd,
                         action: SyncAction::Copy,
@@ -215,7 +214,10 @@ mod tests {
         let home = PathBuf::from("/home/user");
         let agents = vec![make_agent("claude-code", "Claude Code", true)];
         let plan = plan_sync(&prompt, &agents, &home);
-        assert_eq!(plan.mappings[0].destination, PathBuf::from("/home/user/.claude/CLAUDE.md"));
+        assert_eq!(
+            plan.mappings[0].destination,
+            PathBuf::from("/home/user/.claude/CLAUDE.md")
+        );
         assert_eq!(plan.mappings[0].target_format, PromptFormat::PlainMd);
     }
 }

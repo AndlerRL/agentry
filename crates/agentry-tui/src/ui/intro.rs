@@ -38,7 +38,9 @@ pub fn draw_intro(f: &mut Frame, app: &App) {
     }
 
     // ASCII art (progressive reveal)
-    let art_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+    let art_style = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
     for (i, line) in ASCII_ART.iter().enumerate() {
         if i < lines_to_show {
             lines.push(Line::from(Span::styled(*line, art_style)));
@@ -48,23 +50,26 @@ pub fn draw_intro(f: &mut Frame, app: &App) {
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         "     The Multi-Agent Prompt Manager",
-        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(""));
 
     // Progress bar
     let bar_width = 40usize;
     let filled = (bar_width as f32 * app.intro_progress).round() as usize;
-    let bar_str = format!(
-        "[{}{}]",
-        "▓".repeat(filled),
-        "░".repeat(bar_width - filled),
-    );
+    let bar_str = format!("[{}{}]", "▓".repeat(filled), "░".repeat(bar_width - filled),);
 
     let detected = app.detected_agents.len();
     let total = 11;
     let status = if app.intro_progress < 1.0 {
-        format!("  {} Loading agents... ({}/{})", app.spinner_char(), detected, total)
+        format!(
+            "  {} Loading agents... ({}/{})",
+            app.spinner_char(),
+            detected,
+            total
+        )
     } else {
         format!("  {} {} agents detected", app.spinner_char(), detected)
     };
@@ -73,7 +78,10 @@ pub fn draw_intro(f: &mut Frame, app: &App) {
         format!("  {}", bar_str),
         Style::default().fg(Color::Green),
     )));
-    lines.push(Line::from(Span::styled(status, Style::default().fg(Color::Yellow))));
+    lines.push(Line::from(Span::styled(
+        status,
+        Style::default().fg(Color::Yellow),
+    )));
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(

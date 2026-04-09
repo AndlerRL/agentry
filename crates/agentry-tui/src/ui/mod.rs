@@ -1,12 +1,12 @@
-mod intro;
 mod dashboard;
+mod intro;
 
 use ratatui::layout::Rect;
 
 use crate::editor::Editor;
 
-pub use intro::draw_intro;
 pub use dashboard::draw_dashboard;
+pub use intro::draw_intro;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -104,7 +104,10 @@ pub fn draw_editor(f: &mut ratatui::Frame, editor: &Editor) {
             } else if row == editor.cursor.row {
                 Line::from(line.to_string())
             } else {
-                Line::from(Span::styled(line.to_string(), Style::default().fg(Color::White)))
+                Line::from(Span::styled(
+                    line.to_string(),
+                    Style::default().fg(Color::White),
+                ))
             }
         })
         .collect();
@@ -118,8 +121,16 @@ pub fn draw_editor(f: &mut ratatui::Frame, editor: &Editor) {
 
     let block = Block::default()
         .borders(Borders::NONE)
-        .title(format!(" {} │ {}", editor.filename.as_deref().unwrap_or("[No Name]"), mode_indicator))
-        .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+        .title(format!(
+            " {} │ {}",
+            editor.filename.as_deref().unwrap_or("[No Name]"),
+            mode_indicator
+        ))
+        .title_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
 
     let paragraph = Paragraph::new(content)
         .block(block)
@@ -142,6 +153,9 @@ pub fn draw_editor(f: &mut ratatui::Frame, editor: &Editor) {
     } else {
         String::new()
     };
-    let msg_line = Paragraph::new(Line::from(Span::styled(msg, Style::default().fg(Color::Yellow))));
+    let msg_line = Paragraph::new(Line::from(Span::styled(
+        msg,
+        Style::default().fg(Color::Yellow),
+    )));
     f.render_widget(msg_line, chunks[2]);
 }
