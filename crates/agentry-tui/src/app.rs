@@ -7,6 +7,16 @@ use ratatui::{backend::Backend, Frame, Terminal};
 use crate::editor::Editor;
 use crate::ui;
 
+/// A single sync result for display in the Sync tab.
+#[derive(Debug, Clone)]
+pub struct SyncResultEntry {
+    pub prompt_name: String,
+    pub agent_id: String,
+    pub destination: String,
+    pub status: agentry_core::models::SyncStatus,
+    pub action: agentry_core::models::SyncAction,
+}
+
 /// Application state machine: Intro → Dashboard → (various tabs) → Quit
 pub struct App {
     /// Current mode
@@ -23,6 +33,8 @@ pub struct App {
     pub skill_hub: Option<agentry_skills::hub::SkillHub>,
     /// Agent skills directories (for symlink creation)
     pub agent_skills_dirs: Vec<PathBuf>,
+    /// Sync plan entries (populated when user presses 's' on Sync tab)
+    pub sync_results: Vec<SyncResultEntry>,
     /// Editor state (when editing a prompt)
     pub editor: Option<Editor>,
     /// New prompt name (when creating a new prompt)
@@ -80,6 +92,7 @@ impl App {
             prompts: Vec::new(),
             skill_hub: None,
             agent_skills_dirs: Vec::new(),
+            sync_results: Vec::new(),
             editor: None,
             new_prompt_name: None,
             delete_confirm: None,
@@ -376,6 +389,7 @@ impl App {
             0 | 1 => self.detected_agents.len().max(1),
             2 => self.prompts.len() + 1, // +1 for "New Prompt" entry
             3 => self.skill_hub.as_ref().map(|h| h.skills.len()).unwrap_or(0).max(1),
+            4 => self.sync_results.len().max(1),
             _ => 0,
         }
     }
@@ -416,7 +430,34 @@ impl App {
     }
 
     fn on_sync(&mut self) {
-        self.status_message = Some("Sync: not yet implemented (Phase 3)".into());
+        if self.tab_index == 4 {
+            // Sync tab — execute sync for all prompts
+            let home = self.home_dir.clone();
+            let _project_dirs = [home.join("Development")];
+            let agents = self.detected_agents.clone();
+
+            let mut results = Vec::new();
+            for prompt in &self.prompts {
+                let plan = agentry_sync::planner::plan_sync(prompt, &agents, &home);
+                // Check status first
+                let mappings = agentry_sync::executor::check_sync_status(prompt, &plan.mappings);
+                for mapping in &mappings {
+                    results.push(SyncResultEntry {
+                        prompt_name: prompt.name.clone(),
+                        agent_id: mapping.agent_id.clone(),
+                        destination: mapping.destination.display().to_string(),
+                        status: mapping.status,
+                        action: mapping.action,
+                    });
+                }
+            }
+
+            self.sync_results = results;
+            self.status_message = Some(format!("Sync plan loaded ({} mappings)", self.sync_results.len()));
+            self.list_selected = 0;
+        } else {
+            self.status_message = Some("Sync: switch to Sync tab (5) to execute".into());
+        }
     }
 
     fn on_edit(&mut self) {

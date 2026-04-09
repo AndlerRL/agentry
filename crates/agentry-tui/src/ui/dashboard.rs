@@ -59,8 +59,8 @@ pub fn draw_dashboard(f: &mut Frame, app: &App) {
             draw_skill_detail(f, app, main[1]);
         }
         Some(Tab::Sync) => {
-            draw_sync_placeholder(f, main[0]);
-            draw_sync_detail_placeholder(f, main[1]);
+            draw_sync_list(f, app, main[0]);
+            draw_sync_detail(f, app, main[1]);
         }
         Some(Tab::OpenClaw) => {
             draw_openclaw_placeholder(f, main[0]);
@@ -600,26 +600,152 @@ fn draw_skill_detail(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(paragraph, area);
 }
 
-fn draw_sync_placeholder(f: &mut Frame, area: Rect) {
+fn draw_sync_list(f: &mut Frame, app: &App, area: Rect) {
+    let items: Vec<ListItem> = if app.sync_results.is_empty() {
+        vec![ListItem::new(Line::from(Span::styled(
+            "  Press 's' to load sync plan",
+            Style::default().fg(Color::DarkGray),
+        )))]
+    } else {
+        // Group by prompt
+        let mut prompt_groups: std::collections::BTreeMap<String, Vec<&crate::app::SyncResultEntry>> =
+            std::collections::BTreeMap::new();
+        for entry in &app.sync_results {
+            prompt_groups
+                .entry(entry.prompt_name.clone())
+                .or_default()
+                .push(entry);
+        }
+
+        let mut items = Vec::new();
+        for (prompt_name, mappings) in &prompt_groups {
+            items.push(ListItem::new(Line::from(Span::styled(
+                format!(" {}", prompt_name),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ))));
+            for mapping in mappings {
+                let (status_icon, status_color) = match mapping.status {
+                    agentry_core::models::SyncStatus::UpToDate => ("✓", Color::Green),
+                    agentry_core::models::SyncStatus::Missing => ("?", Color::Yellow),
+                    agentry_core::models::SyncStatus::Outdated => ("↑", Color::Yellow),
+                    agentry_core::models::SyncStatus::Conflict => ("!", Color::Red),
+                };
+                items.push(ListItem::new(Line::from(vec![
+                    Span::styled(
+                        format!("  {} ", status_icon),
+                        Style::default().fg(status_color),
+                    ),
+                    Span::styled(
+                        format!("{:<16}", mapping.agent_id),
+                        Style::default().fg(Color::White),
+                    ),
+                    Span::styled(
+                        format!(" {}", mapping.status),
+                        Style::default().fg(status_color),
+                    ),
+                ])));
+            }
+        }
+        items
+    };
+
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Sync (Phase 3) ")
-        .border_style(Style::default().fg(Color::DarkGray));
-    let text = Paragraph::new(Line::from(Span::styled(
-        "  Not yet implemented",
-        Style::default().fg(Color::DarkGray),
-    )))
-    .block(block);
-    f.render_widget(text, area);
+        .title(format!(
+            " Sync ({}) ",
+            app.sync_results.iter().filter(|r| r.status == agentry_core::models::SyncStatus::Missing || r.status == agentry_core::models::SyncStatus::Outdated).count()
+        ))
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let mut state = ListState::default();
+    if app.list_selected < items.len() {
+        state.select(Some(app.list_selected));
+    }
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    f.render_stateful_widget(list, area, &mut state);
 }
 
-fn draw_sync_detail_placeholder(f: &mut Frame, area: Rect) {
+fn draw_sync_detail(f: &mut Frame, app: &App, area: Rect) {
+    let lines = if !app.sync_results.is_empty() && app.list_selected < app.sync_results.len() {
+        let entry = &app.sync_results[app.list_selected];
+
+        let (status_icon, status_color) = match entry.status {
+            agentry_core::models::SyncStatus::UpToDate => ("Up to date ✓", Color::Green),
+            agentry_core::models::SyncStatus::Missing => ("Missing ?", Color::Yellow),
+            agentry_core::models::SyncStatus::Outdated => ("Outdated ↑", Color::Yellow),
+            agentry_core::models::SyncStatus::Conflict => ("Conflict !", Color::Red),
+        };
+
+        let action_label = match entry.action {
+            agentry_core::models::SyncAction::Copy => "Copy (format-convert)",
+            agentry_core::models::SyncAction::Symlink => "Symlink (relative)",
+            agentry_core::models::SyncAction::Source => "Source (skip)",
+            agentry_core::models::SyncAction::Skip => "Skip",
+        };
+
+        vec![
+            Line::from(Span::styled(
+                format!(" {} → {} ", entry.prompt_name, entry.agent_id),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  Status:     ", Style::default().fg(Color::Yellow)),
+                Span::styled(status_icon.to_string(), Style::default().fg(status_color)),
+            ]),
+            Line::from(vec![
+                Span::styled("  Action:     ", Style::default().fg(Color::Yellow)),
+                Span::styled(action_label, Style::default().fg(Color::White)),
+            ]),
+            Line::from(vec![
+                Span::styled("  Target:     ", Style::default().fg(Color::Yellow)),
+                Span::styled(entry.destination.clone(), Style::default().fg(Color::DarkGray)),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled(
+                " ── Actions ──────────────────────────",
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(Span::styled(
+                "  s: Execute sync  Tab: other tabs",
+                Style::default().fg(Color::Yellow),
+            )),
+        ]
+    } else if app.sync_results.is_empty() {
+        vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Press 's' to load sync plan",
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Shows where each prompt will be synced",
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(Span::styled(
+                "  across all detected agents.",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ]
+    } else {
+        vec![Line::from("")]
+    };
+
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" Sync Details ")
-        .border_style(Style::default().fg(Color::DarkGray));
-    let text = Paragraph::new("").block(block);
-    f.render_widget(text, area);
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let paragraph = Paragraph::new(lines).block(block);
+    f.render_widget(paragraph, area);
 }
 
 fn draw_openclaw_placeholder(f: &mut Frame, area: Rect) {
