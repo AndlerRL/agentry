@@ -17,6 +17,12 @@ pub struct SyncResultEntry {
     pub action: agentry_core::models::SyncAction,
 }
 
+/// OpenClaw workspace data loaded on startup.
+pub struct OpenClawState {
+    pub workspaces: Vec<agentry_openclaw::discovery::OpenClawWorkspace>,
+    pub installed: bool,
+}
+
 /// Application state machine: Intro → Dashboard → (various tabs) → Quit
 pub struct App {
     /// Current mode
@@ -35,6 +41,8 @@ pub struct App {
     pub agent_skills_dirs: Vec<PathBuf>,
     /// Sync plan entries (populated when user presses 's' on Sync tab)
     pub sync_results: Vec<SyncResultEntry>,
+    /// OpenClaw workspace data
+    pub openclaw_state: Option<OpenClawState>,
     /// Editor state (when editing a prompt)
     pub editor: Option<Editor>,
     /// New prompt name (when creating a new prompt)
@@ -93,6 +101,7 @@ impl App {
             skill_hub: None,
             agent_skills_dirs: Vec::new(),
             sync_results: Vec::new(),
+            openclaw_state: None,
             editor: None,
             new_prompt_name: None,
             delete_confirm: None,
@@ -123,6 +132,9 @@ impl App {
 
         // Discover skills
         self.discover_skills();
+
+        // Discover OpenClaw workspaces
+        self.discover_openclaw();
 
         // Main event loop
         while !self.should_quit {
@@ -163,6 +175,25 @@ impl App {
             }
             Err(e) => {
                 self.status_message = Some(format!("Failed to load skills: {}", e));
+            }
+        }
+    }
+
+    fn discover_openclaw(&mut self) {
+        let installed = agentry_openclaw::discovery::is_openclaw_installed();
+        match agentry_openclaw::discovery::discover_workspaces(&self.home_dir) {
+            Ok(workspaces) => {
+                self.openclaw_state = Some(OpenClawState {
+                    workspaces,
+                    installed,
+                });
+            }
+            Err(e) => {
+                self.openclaw_state = Some(OpenClawState {
+                    workspaces: Vec::new(),
+                    installed,
+                });
+                self.status_message = Some(format!("OpenClaw: {}", e));
             }
         }
     }
@@ -352,6 +383,8 @@ impl App {
             KeyCode::Char('u') => self.on_update(),
             KeyCode::Char('r') => self.on_remove(),
             KeyCode::Char('g') => self.on_github(),
+            KeyCode::Char('c') => self.on_create_workspace(),
+            KeyCode::Char('a') => self.on_add_agent(),
             _ => {}
         }
         Ok(())
@@ -390,6 +423,7 @@ impl App {
             2 => self.prompts.len() + 1, // +1 for "New Prompt" entry
             3 => self.skill_hub.as_ref().map(|h| h.skills.len()).unwrap_or(0).max(1),
             4 => self.sync_results.len().max(1),
+            5 => self.openclaw_state.as_ref().map(|s| s.workspaces.len()).unwrap_or(0).max(1),
             _ => 0,
         }
     }
@@ -654,5 +688,27 @@ impl App {
 
     pub fn spinner_char(&self) -> char {
         SPINNER_FRAMES[self.spinner_frame % SPINNER_FRAMES.len()]
+    }
+
+    fn on_create_workspace(&mut self) {
+        if self.tab_index == 5 {
+            if agentry_openclaw::discovery::is_openclaw_installed() {
+                self.status_message = Some("Run: openclaw setup".into());
+                let _ = std::process::Command::new("openclaw").arg("setup").spawn();
+            } else {
+                self.status_message = Some("OpenClaw not installed. Install from https://openclaw.dev".into());
+            }
+        }
+    }
+
+    fn on_add_agent(&mut self) {
+        if self.tab_index == 5 {
+            if agentry_openclaw::discovery::is_openclaw_installed() {
+                self.status_message = Some("Run: openclaw agents add <name>".into());
+                // Could prompt for name in the future, for now show guidance
+            } else {
+                self.status_message = Some("OpenClaw not installed".into());
+            }
+        }
     }
 }
