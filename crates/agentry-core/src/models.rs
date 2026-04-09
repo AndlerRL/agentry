@@ -49,14 +49,14 @@ impl std::fmt::Display for PromptScope {
 }
 
 /// An XML tag wrapper used in Continue format (e.g. `<expertise>...</expertise>`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct XmlTagWrap {
     pub tag: String,
     pub content: String,
 }
 
 /// Unified internal representation of a prompt from any agent format.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UnifiedPrompt {
     pub id: String,
     pub name: String,

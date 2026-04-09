@@ -47,8 +47,8 @@ pub fn draw_dashboard(f: &mut Frame, app: &App) {
             draw_agent_detail(f, app, main[1]);
         }
         Some(Tab::Prompts) => {
-            draw_prompts_placeholder(f, main[0], "Prompts");
-            draw_prompts_detail_placeholder(f, main[1]);
+            draw_prompts_list(f, app, main[0]);
+            draw_prompt_detail(f, app, main[1]);
         }
         Some(Tab::Skills) => {
             draw_skills_placeholder(f, main[0]);
@@ -213,23 +213,157 @@ fn draw_agent_detail(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(paragraph, area);
 }
 
-fn draw_prompts_placeholder(f: &mut Frame, area: Rect, label: &str) {
+fn draw_prompts_list(f: &mut Frame, app: &App, area: Rect) {
+    let mut items: Vec<ListItem> = Vec::new();
+
+    // Global prompts
+    let global_prompts: Vec<_> = app.prompts.iter()
+        .filter(|p| matches!(p.scope, agentry_core::models::PromptScope::Global))
+        .collect();
+
+    if !global_prompts.is_empty() {
+        items.push(ListItem::new(Line::from(Span::styled(
+            " Global Prompts",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        ))));
+        for prompt in &global_prompts {
+            let selected = app.list_selected < app.prompts.len()
+                && app.prompts[app.list_selected].id == prompt.id;
+            items.push(ListItem::new(Line::from(Span::styled(
+                format!("  {} {}", prompt.name, if selected { "◄" } else { "" }),
+                Style::default().fg(Color::White),
+            ))));
+        }
+    }
+
+    // Project prompts
+    let project_prompts: Vec<_> = app.prompts.iter()
+        .filter(|p| matches!(p.scope, agentry_core::models::PromptScope::Project { .. }))
+        .collect();
+
+    if !project_prompts.is_empty() {
+        items.push(ListItem::new(Line::from(Span::styled(
+            " Project Prompts",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        ))));
+        for prompt in &project_prompts {
+            let scope_label = match &prompt.scope {
+                agentry_core::models::PromptScope::Project { root } => {
+                    root.file_name().and_then(|n| n.to_str()).unwrap_or("?")
+                }
+                _ => "",
+            };
+            items.push(ListItem::new(Line::from(Span::styled(
+                format!("  {}/{}", scope_label, prompt.name),
+                Style::default().fg(Color::White),
+            ))));
+        }
+    }
+
+    items.push(ListItem::new(Line::from(Span::styled(
+        " + [New Global Prompt]",
+        Style::default().fg(Color::Green),
+    ))));
+
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(format!(" {} (coming in Phase 2) ", label))
-        .border_style(Style::default().fg(Color::DarkGray));
-    let text = Paragraph::new(Line::from(Span::styled(
-        "  Not yet implemented",
-        Style::default().fg(Color::DarkGray),
-    )))
-    .block(block);
-    f.render_widget(text, area);
+        .title(format!(" Prompts ({}) ", app.prompts.len()))
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let mut state = ListState::default();
+    if app.list_selected < items.len() {
+        state.select(Some(app.list_selected));
+    }
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    f.render_stateful_widget(list, area, &mut state);
+}
+
+fn draw_prompt_detail(f: &mut Frame, app: &App, area: Rect) {
+    let prompt = app.prompts.get(app.list_selected);
+
+    let lines = if let Some(prompt) = prompt {
+        let scope_label = match &prompt.scope {
+            agentry_core::models::PromptScope::Global => "Global".to_string(),
+            agentry_core::models::PromptScope::Project { root } => {
+                format!("Project ({})", root.display())
+            }
+        };
+
+        let mut lines = vec![
+            Line::from(Span::styled(
+                format!(" {} ", prompt.name),
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  Scope:    ", Style::default().fg(Color::Yellow)),
+                Span::styled(scope_label, Style::default().fg(Color::White)),
+            ]),
+            Line::from(vec![
+                Span::styled("  Format:   ", Style::default().fg(Color::Yellow)),
+                Span::styled(format!("{}", prompt.source_format), Style::default().fg(Color::White)),
+            ]),
+            Line::from(vec![
+                Span::styled("  File:     ", Style::default().fg(Color::Yellow)),
+                Span::styled(
+                    prompt.source_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]),
+        ];
+
+        if !prompt.description.is_empty() {
+            lines.push(Line::from(vec![
+                Span::styled("  Desc:     ", Style::default().fg(Color::Yellow)),
+                Span::styled(&prompt.description, Style::default().fg(Color::White)),
+            ]));
+        }
+
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            " ── Preview ──────────────────────────",
+            Style::default().fg(Color::DarkGray),
+        )));
+
+        // Show first 20 lines of the prompt body
+        for line in prompt.body.lines().take(20) {
+            lines.push(Line::from(Span::styled(
+                format!(" {}", line),
+                Style::default().fg(Color::White),
+            )));
+        }
+
+        lines
+    } else {
+        vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Select a prompt to view details",
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(""),
+            Line::from(Span::styled("  n: New prompt", Style::default().fg(Color::Yellow))),
+            Line::from(Span::styled("  e: Edit prompt", Style::default().fg(Color::Yellow))),
+            Line::from(Span::styled("  d: Delete prompt", Style::default().fg(Color::Yellow))),
+        ]
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Prompt Details ")
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let paragraph = Paragraph::new(lines).block(block);
+    f.render_widget(paragraph, area);
 }
 
 fn draw_prompts_detail_placeholder(f: &mut Frame, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Prompt Editor (Phase 2) ")
+        .title(" Prompt Details ")
         .border_style(Style::default().fg(Color::DarkGray));
     let text = Paragraph::new("").block(block);
     f.render_widget(text, area);
