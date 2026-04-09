@@ -189,21 +189,111 @@ async fn cmd_sync(prompt_name: Option<String>, all: bool, dry_run: bool) -> Resu
 }
 
 async fn cmd_skills(action: Option<SkillsCommands>) -> Result<()> {
+    let home = std::env::var("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default();
+
     match action {
         Some(SkillsCommands::List) => {
-            println!("Skills list — not yet implemented (Phase 4)");
+            let hub = agentry_skills::hub::SkillHub::load(&home, &[])?;
+            let installed = hub.installed_count();
+            let total = hub.total_count();
+            println!("Skills ({}/{} installed):\n", installed, total);
+
+            // Group by source
+            let mut source_groups: std::collections::BTreeMap<String, Vec<&agentry_skills::hub::AvailableSkill>> =
+                std::collections::BTreeMap::new();
+            for skill in hub.skills.values() {
+                let key = if skill.source.is_empty() {
+                    "unknown".to_string()
+                } else {
+                    skill.source.clone()
+                };
+                source_groups.entry(key).or_default().push(skill);
+            }
+
+            for (source, skills) in &source_groups {
+                let inst = skills.iter().filter(|s| s.installed).count();
+                println!("  {} ({}/{} installed)", source, inst, skills.len());
+                for skill in skills {
+                    let status = if skill.installed { "✓" } else { "○" };
+                    let desc = if skill.description.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" — {}", skill.description)
+                    };
+                    println!("    {} {}{}", status, skill.name, desc);
+                }
+                println!();
+            }
         }
         Some(SkillsCommands::Install { name }) => {
-            println!(
-                "Installing skill '{}' — not yet implemented (Phase 4)",
-                name
-            );
+            println!("Installing skill '{}'...", name);
+
+            // Detect agents to find skills dirs
+            let agents = agentry_agents::detect_all_agents().await;
+            let skills_dirs: Vec<std::path::PathBuf> = agents
+                .iter()
+                .filter(|a| a.installed)
+                .filter_map(|a| a.skills_dir.clone())
+                .collect();
+
+            // Find the skill in the hub or look up by source
+            let hub = agentry_skills::hub::SkillHub::load(&home, &[])?;
+
+            // Try to find skill by name in existing entries
+            if let Some(skill) = hub.skills.get(&name) {
+                if skill.installed {
+                    println!("  Skill '{}' is already installed", name);
+                    return Ok(());
+                }
+                let source = if skill.source.is_empty() {
+                    // Try to find in known sources
+                    println!("  No source found for '{}'. Try: agentry skills install <source>/<skill-path>", name);
+                    return Ok(());
+                } else {
+                    skill.source.clone()
+                };
+                let result = agentry_skills::install::install_skill(
+                    &home, &source, &skill.skill_path, &skills_dirs,
+                )?;
+                let icon = if result.success { "✓" } else { "✗" };
+                println!("  {} {}", icon, result.message);
+            } else {
+                println!("  Skill '{}' not found. Use skills.sh to browse available skills.", name);
+            }
         }
         Some(SkillsCommands::Update) => {
-            println!("Updating skills — not yet implemented (Phase 4)");
+            println!("Updating all skills...");
+
+            let agents = agentry_agents::detect_all_agents().await;
+            let skills_dirs: Vec<std::path::PathBuf> = agents
+                .iter()
+                .filter(|a| a.installed)
+                .filter_map(|a| a.skills_dir.clone())
+                .collect();
+
+            let results = agentry_skills::install::update_all_skills(&home, &skills_dirs);
+            let ok = results.iter().filter(|r| r.success).count();
+            for result in &results {
+                let icon = if result.success { "✓" } else { "✗" };
+                println!("  {} {} — {}", icon, result.skill_name, result.message);
+            }
+            println!("\nUpdated {}/{} skills", ok, results.len());
         }
         Some(SkillsCommands::Remove { name }) => {
-            println!("Removing skill '{}' — not yet implemented (Phase 4)", name);
+            println!("Removing skill '{}'...", name);
+
+            let agents = agentry_agents::detect_all_agents().await;
+            let skills_dirs: Vec<std::path::PathBuf> = agents
+                .iter()
+                .filter(|a| a.installed)
+                .filter_map(|a| a.skills_dir.clone())
+                .collect();
+
+            let result = agentry_skills::install::remove_skill(&home, &name, &skills_dirs)?;
+            let icon = if result.success { "✓" } else { "✗" };
+            println!("  {} {}", icon, result.message);
         }
         None => {
             println!("Usage: agentry skills <list|install|update|remove>");
