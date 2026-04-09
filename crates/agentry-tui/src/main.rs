@@ -341,9 +341,49 @@ async fn cmd_prompts(action: Option<PromptsCommands>) -> Result<()> {
 }
 
 async fn cmd_openclaw(action: Option<OpenclawCommands>) -> Result<()> {
+    let home = std::env::var("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default();
+
     match action {
         Some(OpenclawCommands::Workspaces) => {
-            println!("OpenClaw workspaces — not yet implemented (Phase 5)");
+            let installed = agentry_openclaw::discovery::is_openclaw_installed();
+            if !installed {
+                println!("OpenClaw CLI is not installed.");
+                println!("Install from https://openclaw.dev\n");
+            }
+
+            let workspaces = agentry_openclaw::discovery::discover_workspaces(&home)?;
+            if workspaces.is_empty() {
+                println!("No OpenClaw workspaces found.");
+                if installed {
+                    println!("\nRun 'openclaw setup' to create a default workspace.");
+                }
+            } else {
+                println!("OpenClaw Workspaces ({}):\n", workspaces.len());
+                for ws in &workspaces {
+                    let default_marker = if ws.is_default { " (default)" } else { "" };
+                    let model_info = ws.model.as_deref().unwrap_or("default");
+                    println!(
+                        "  {}{} [{}]",
+                        ws.name, default_marker, model_info
+                    );
+                    println!("    Path: {}", ws.workspace_path.display());
+
+                    // Doc status
+                    let docs: Vec<String> = ws.docs.iter().map(|d| d.name.clone()).collect();
+                    if !docs.is_empty() {
+                        println!("    Docs: {}", docs.join(", "));
+                    }
+
+                    // Lobster workflows
+                    if !ws.lobster_workflows.is_empty() {
+                        let wfs: Vec<String> = ws.lobster_workflows.iter().map(|w| w.name.clone()).collect();
+                        println!("    Workflows: {}", wfs.join(", "));
+                    }
+                    println!();
+                }
+            }
         }
         None => {
             println!("Usage: agentry openclaw <workspaces>");
