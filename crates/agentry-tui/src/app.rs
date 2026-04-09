@@ -431,15 +431,15 @@ impl App {
 
     fn on_sync(&mut self) {
         if self.tab_index == 4 {
-            // Sync tab — execute sync for all prompts
+            // Sync tab — execute sync for all prompts (agents + projects)
             let home = self.home_dir.clone();
-            let _project_dirs = [home.join("Development")];
+            let project_dirs = [home.join("Development")];
             let agents = self.detected_agents.clone();
 
             let mut results = Vec::new();
             for prompt in &self.prompts {
+                // Agent-level sync
                 let plan = agentry_sync::planner::plan_sync(prompt, &agents, &home);
-                // Check status first
                 let mappings = agentry_sync::executor::check_sync_status(prompt, &plan.mappings);
                 for mapping in &mappings {
                     results.push(SyncResultEntry {
@@ -449,6 +449,23 @@ impl App {
                         status: mapping.status,
                         action: mapping.action,
                     });
+                }
+
+                // Project-level sync for global prompts
+                let project_mappings =
+                    agentry_sync::planner::project_sync_plans(prompt, &project_dirs, &home);
+                if !project_mappings.is_empty() {
+                    let checked =
+                        agentry_sync::executor::check_sync_status(prompt, &project_mappings);
+                    for mapping in &checked {
+                        results.push(SyncResultEntry {
+                            prompt_name: prompt.name.clone(),
+                            agent_id: mapping.agent_id.clone(),
+                            destination: mapping.destination.display().to_string(),
+                            status: mapping.status,
+                            action: mapping.action,
+                        });
+                    }
                 }
             }
 
