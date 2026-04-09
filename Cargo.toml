@@ -51,3 +51,8 @@ agentry-sync = { path = "crates/agentry-sync" }
 agentry-skills = { path = "crates/agentry-skills" }
 agentry-openclaw = { path = "crates/agentry-openclaw" }
 agentry-acp = { path = "crates/agentry-acp" }
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
