@@ -1,1 +1,117 @@
-// Stub: will be implemented in P1.3
+use agentry_core::models::{AgentSpec, PromptFormat};
+
+/// All 11 known agent specifications.
+pub fn all_agent_specs() -> Vec<AgentSpec> {
+    vec![
+        AgentSpec {
+            id: "claude-code".into(),
+            name: "Claude Code".into(),
+            cli_binary: "claude".into(),
+            config_dir: ".claude".into(),
+            prompt_filename: "CLAUDE.md".into(),
+            prompt_format: PromptFormat::PlainMd,
+            skills_dir_name: Some("skills".into()),
+            max_size: None,
+        },
+        AgentSpec {
+            id: "continue".into(),
+            name: "Continue".into(),
+            cli_binary: "continue".into(),
+            config_dir: ".continue".into(),
+            prompt_filename: "prompts".into(), // directory, not single file
+            prompt_format: PromptFormat::XmlTagMd,
+            skills_dir_name: None,
+            max_size: None,
+        },
+        AgentSpec {
+            id: "gemini-cli".into(),
+            name: "Gemini CLI".into(),
+            cli_binary: "gemini".into(),
+            config_dir: ".gemini".into(),
+            prompt_filename: "GEMINI.md".into(),
+            prompt_format: PromptFormat::PlainMd,
+            skills_dir_name: None,
+            max_size: None,
+        },
+        AgentSpec {
+            id: "codex".into(),
+            name: "Codex".into(),
+            cli_binary: "codex".into(),
+            config_dir: ".codex".into(),
+            prompt_filename: "AGENTS.md".into(),
+            prompt_format: PromptFormat::PlainMd,
+            skills_dir_name: None,
+            max_size: Some(32768), // 32 KiB limit
+        },
+        AgentSpec {
+            id: "opencode".into(),
+            name: "OpenCode".into(),
+            cli_binary: "opencode".into(),
+            config_dir: ".opencode".into(),
+            prompt_filename: "AGENTS.md".into(),
+            prompt_format: PromptFormat::FrontmatterMd,
+            skills_dir_name: None,
+            max_size: None,
+        },
+        AgentSpec {
+            id: "amp".into(),
+            name: "Amp".into(),
+            cli_binary: "amp".into(),
+            config_dir: ".amp".into(),
+            prompt_filename: "AGENTS.md".into(),
+            prompt_format: PromptFormat::PlainMd,
+            skills_dir_name: None,
+            max_size: None,
+        },
+        AgentSpec {
+            id: "firebender".into(),
+            name: "Firebender".into(),
+            cli_binary: "firebender".into(),
+            config_dir: ".firebender".into(),
+            prompt_filename: "rules".into(), // .mdc directory
+            prompt_format: PromptFormat::Mdc,
+            skills_dir_name: None,
+            max_size: None,
+        },
+        AgentSpec {
+            id: "openclaw".into(),
+            name: "OpenClaw".into(),
+            cli_binary: "openclaw".into(),
+            config_dir: ".openclaw".into(),
+            prompt_filename: "AGENTS.md".into(),
+            prompt_format: PromptFormat::PlainMd,
+            skills_dir_name: None,
+            max_size: None,
+        },
+        AgentSpec {
+            id: "deepagents".into(),
+            name: "DeepAgents".into(),
+            cli_binary: "deepagents".into(),
+            config_dir: ".deepagents".into(),
+            prompt_filename: "AGENTS.md".into(),
+            prompt_format: PromptFormat::PlainMd,
+            skills_dir_name: None,
+            max_size: None,
+        },
+        AgentSpec {
+            id: "antigravity".into(),
+            name: "Antigravity".into(),
+            cli_binary: "antigravity".into(),
+            config_dir: ".antigravity".into(),
+            prompt_filename: "SKILL.md".into(),
+            prompt_format: PromptFormat::FrontmatterMd,
+            skills_dir_name: None,
+            max_size: None,
+        },
+        AgentSpec {
+            id: "warp".into(),
+            name: "Warp".into(),
+            cli_binary: "warp-cli".into(),
+            config_dir: ".warp".into(),
+            prompt_filename: "AGENTS.md".into(),
+            prompt_format: PromptFormat::FrontmatterMd,
+            skills_dir_name: None,
+            max_size: None,
+        },
+    ]
+}
