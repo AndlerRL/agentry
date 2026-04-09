@@ -19,6 +19,10 @@ pub struct App {
     pub detected_agents: Vec<agentry_core::models::DetectedAgent>,
     /// Discovered prompts
     pub prompts: Vec<agentry_core::models::UnifiedPrompt>,
+    /// Skill hub data
+    pub skill_hub: Option<agentry_skills::hub::SkillHub>,
+    /// Agent skills directories (for symlink creation)
+    pub agent_skills_dirs: Vec<PathBuf>,
     /// Editor state (when editing a prompt)
     pub editor: Option<Editor>,
     /// New prompt name (when creating a new prompt)
@@ -39,6 +43,8 @@ pub struct App {
     pub status_message: Option<String>,
     /// Help visible
     pub show_help: bool,
+    /// Skill action pending confirmation
+    pub skill_confirm: Option<SkillConfirmAction>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +53,15 @@ pub enum AppMode {
     Dashboard,
     Editor,
     Quit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum SkillConfirmAction {
+    Install(String),
+    Remove(String),
+    Update(String),
+    UpdateAll,
 }
 
 const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -63,6 +78,8 @@ impl App {
             list_selected: 0,
             detected_agents: Vec::new(),
             prompts: Vec::new(),
+            skill_hub: None,
+            agent_skills_dirs: Vec::new(),
             editor: None,
             new_prompt_name: None,
             delete_confirm: None,
@@ -73,6 +90,7 @@ impl App {
             should_quit: false,
             status_message: None,
             show_help: false,
+            skill_confirm: None,
         }
     }
 
@@ -89,6 +107,9 @@ impl App {
 
         // Discover prompts
         self.discover_prompts();
+
+        // Discover skills
+        self.discover_skills();
 
         // Main event loop
         while !self.should_quit {
@@ -111,6 +132,26 @@ impl App {
     fn discover_prompts(&mut self) {
         let project_dirs = vec![self.home_dir.join("Development")];
         self.prompts = agentry_core::discover_prompts(&self.home_dir, &project_dirs);
+    }
+
+    fn discover_skills(&mut self) {
+        let extra_sources: Vec<String> = Vec::new();
+        match agentry_skills::hub::SkillHub::load(&self.home_dir, &extra_sources) {
+            Ok(hub) => {
+                // Collect agent skills directories for symlink management
+                let dirs: Vec<PathBuf> = self
+                    .detected_agents
+                    .iter()
+                    .filter(|a| a.installed)
+                    .filter_map(|a| a.skills_dir.clone())
+                    .collect();
+                self.agent_skills_dirs = dirs;
+                self.skill_hub = Some(hub);
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Failed to load skills: {}", e));
+            }
+        }
     }
 
     async fn run_intro<B: Backend + std::io::Write>(
@@ -219,6 +260,23 @@ impl App {
             return Ok(());
         }
 
+        // Handle skill confirm action
+        if self.skill_confirm.is_some() {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    let action = self.skill_confirm.take();
+                    if let Some(action) = action {
+                        self.execute_skill_action(action);
+                    }
+                }
+                KeyCode::Char('n') | KeyCode::Esc => {
+                    self.skill_confirm = None;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
         // Handle new prompt name input
         if self.new_prompt_name.is_some() {
             match key.code {
@@ -279,6 +337,8 @@ impl App {
             KeyCode::Char('e') => self.on_edit(),
             KeyCode::Char('i') => self.on_insert(),
             KeyCode::Char('u') => self.on_update(),
+            KeyCode::Char('r') => self.on_remove(),
+            KeyCode::Char('g') => self.on_github(),
             _ => {}
         }
         Ok(())
@@ -315,6 +375,7 @@ impl App {
         match self.tab_index {
             0 | 1 => self.detected_agents.len().max(1),
             2 => self.prompts.len() + 1, // +1 for "New Prompt" entry
+            3 => self.skill_hub.as_ref().map(|h| h.skills.len()).unwrap_or(0).max(1),
             _ => 0,
         }
     }
@@ -363,11 +424,161 @@ impl App {
     }
 
     fn on_insert(&mut self) {
-        self.on_new(); // Same as 'n' - create new prompt
+        // In Skills tab: install selected skill
+        if self.tab_index == 3 {
+            if let Some(ref hub) = self.skill_hub {
+                let skills: Vec<_> = hub.skills.values().collect();
+                if self.list_selected < skills.len() {
+                    let skill = skills[self.list_selected];
+                    if !skill.installed {
+                        self.skill_confirm = Some(SkillConfirmAction::Install(skill.name.clone()));
+                        self.status_message =
+                            Some(format!("Install '{}'? (y/n)", skill.name));
+                    } else {
+                        self.status_message = Some(format!(
+                            "'{}' is already installed",
+                            skill.name
+                        ));
+                    }
+                }
+            }
+        } else {
+            self.on_new(); // Same as 'n' - create new prompt
+        }
     }
 
     fn on_update(&mut self) {
-        self.status_message = Some("Update: not yet implemented (Phase 4)".into());
+        if self.tab_index == 3 {
+            // Skills tab - update selected or all
+            if let Some(ref hub) = self.skill_hub {
+                let skills: Vec<_> = hub.skills.values().collect();
+                if self.list_selected < skills.len() {
+                    let skill = skills[self.list_selected];
+                    if skill.installed {
+                        self.skill_confirm = Some(SkillConfirmAction::Update(skill.name.clone()));
+                        self.status_message =
+                            Some(format!("Update '{}'? (y/n)", skill.name));
+                    } else {
+                        self.status_message =
+                            Some(format!("'{}' is not installed", skill.name));
+                    }
+                }
+            }
+        } else {
+            self.status_message = Some("Update: only available in Skills tab".into());
+        }
+    }
+
+    fn on_remove(&mut self) {
+        if self.tab_index == 3 {
+            // Skills tab - remove selected skill
+            if let Some(ref hub) = self.skill_hub {
+                let skills: Vec<_> = hub.skills.values().collect();
+                if self.list_selected < skills.len() {
+                    let skill = skills[self.list_selected];
+                    if skill.installed {
+                        self.skill_confirm = Some(SkillConfirmAction::Remove(skill.name.clone()));
+                        self.status_message =
+                            Some(format!("Remove '{}'? (y/n)", skill.name));
+                    } else {
+                        self.status_message =
+                            Some(format!("'{}' is not installed", skill.name));
+                    }
+                }
+            }
+        }
+    }
+
+    fn on_github(&mut self) {
+        if self.tab_index == 3 {
+            // Skills tab - open GitHub source in browser
+            if let Some(ref hub) = self.skill_hub {
+                let skills: Vec<_> = hub.skills.values().collect();
+                if self.list_selected < skills.len() {
+                    let skill = skills[self.list_selected];
+                    if !skill.source_url.is_empty() {
+                        let url = skill.source_url.clone();
+                        self.status_message = Some(format!("Open: {}", url));
+                        // Try to open in browser
+                        let _ = std::process::Command::new("open").arg(&url).spawn();
+                    }
+                }
+            }
+        }
+    }
+
+    fn execute_skill_action(&mut self, action: SkillConfirmAction) {
+        match action {
+            SkillConfirmAction::Install(name) => {
+                let home = self.home_dir.clone();
+                let dirs = self.agent_skills_dirs.clone();
+                if let Some(ref hub) = self.skill_hub {
+                    if let Some(skill) = hub.skills.get(&name) {
+                        let source = skill.source.clone();
+                        let skill_path = skill.skill_path.clone();
+                        // If source is empty, we can't install
+                        if source.is_empty() {
+                            self.status_message =
+                                Some(format!("No source for '{}'", name));
+                            return;
+                        }
+                        let result = agentry_skills::install::install_skill(
+                            &home, &source, &skill_path, &dirs,
+                        );
+                        match result {
+                            Ok(r) => {
+                                self.status_message = Some(r.message);
+                                self.discover_skills(); // Refresh
+                            }
+                            Err(e) => {
+                                self.status_message =
+                                    Some(format!("Install error: {}", e));
+                            }
+                        }
+                    }
+                }
+            }
+            SkillConfirmAction::Remove(name) => {
+                let home = self.home_dir.clone();
+                let dirs = self.agent_skills_dirs.clone();
+                let result = agentry_skills::install::remove_skill(&home, &name, &dirs);
+                match result {
+                    Ok(r) => {
+                        self.status_message = Some(r.message);
+                        self.discover_skills(); // Refresh
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Remove error: {}", e));
+                    }
+                }
+            }
+            SkillConfirmAction::Update(name) => {
+                let home = self.home_dir.clone();
+                let dirs = self.agent_skills_dirs.clone();
+                let result = agentry_skills::install::update_skill(&home, &name, &dirs);
+                match result {
+                    Ok(r) => {
+                        self.status_message = Some(r.message);
+                        self.discover_skills(); // Refresh
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Update error: {}", e));
+                    }
+                }
+            }
+            SkillConfirmAction::UpdateAll => {
+                let home = self.home_dir.clone();
+                let dirs = self.agent_skills_dirs.clone();
+                let results = agentry_skills::install::update_all_skills(&home, &dirs);
+                let ok_count = results.iter().filter(|r| r.success).count();
+                self.status_message = Some(format!(
+                    "Updated {}/{} skills",
+                    ok_count,
+                    results.len()
+                ));
+                self.discover_skills(); // Refresh
+            }
+        }
     }
 
     fn draw(&self, f: &mut Frame) {

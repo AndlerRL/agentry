@@ -55,8 +55,8 @@ pub fn draw_dashboard(f: &mut Frame, app: &App) {
             draw_prompt_detail(f, app, main[1]);
         }
         Some(Tab::Skills) => {
-            draw_skills_placeholder(f, main[0]);
-            draw_skills_detail_placeholder(f, main[1]);
+            draw_skills_list(f, app, main[0]);
+            draw_skill_detail(f, app, main[1]);
         }
         Some(Tab::Sync) => {
             draw_sync_placeholder(f, main[0]);
@@ -416,26 +416,188 @@ fn draw_prompts_detail_placeholder(f: &mut Frame, area: Rect) {
     f.render_widget(text, area);
 }
 
-fn draw_skills_placeholder(f: &mut Frame, area: Rect) {
+fn draw_skills_list(f: &mut Frame, app: &App, area: Rect) {
+    let items: Vec<ListItem> = if let Some(ref hub) = app.skill_hub {
+        let mut items: Vec<ListItem> = Vec::new();
+
+        // Group by source
+        let mut source_groups: std::collections::BTreeMap<String, Vec<&agentry_skills::hub::AvailableSkill>> = std::collections::BTreeMap::new();
+        for skill in hub.skills.values() {
+            let source_key = if skill.source.is_empty() {
+                "unknown".to_string()
+            } else {
+                skill.source.clone()
+            };
+            source_groups.entry(source_key).or_default().push(skill);
+        }
+
+        for (source, skills) in &source_groups {
+            let installed_count = skills.iter().filter(|s| s.installed).count();
+            items.push(ListItem::new(Line::from(Span::styled(
+                format!(" {} ({} installed)", source, installed_count),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ))));
+            for skill in skills {
+                let status = if skill.installed { "✓" } else { "○" };
+                let status_color = if skill.installed {
+                    Color::Green
+                } else {
+                    Color::DarkGray
+                };
+                items.push(ListItem::new(Line::from(vec![
+                    Span::styled(
+                        format!("  {} ", status),
+                        Style::default().fg(status_color),
+                    ),
+                    Span::styled(
+                        skill.name.clone(),
+                        Style::default().fg(Color::White),
+                    ),
+                ])));
+            }
+        }
+
+        items
+    } else {
+        vec![ListItem::new(Line::from(Span::styled(
+            "  Failed to load skills",
+            Style::default().fg(Color::Red),
+        )))]
+    };
+
+    let installed = app
+        .skill_hub
+        .as_ref()
+        .map(|h| h.installed_count())
+        .unwrap_or(0);
+    let total = app
+        .skill_hub
+        .as_ref()
+        .map(|h| h.total_count())
+        .unwrap_or(0);
+
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Skills (Phase 4) ")
-        .border_style(Style::default().fg(Color::DarkGray));
-    let text = Paragraph::new(Line::from(Span::styled(
-        "  Not yet implemented",
-        Style::default().fg(Color::DarkGray),
-    )))
-    .block(block);
-    f.render_widget(text, area);
+        .title(format!(" Skills ({}/{}) ", installed, total))
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let mut state = ListState::default();
+    if app.list_selected < items.len() {
+        state.select(Some(app.list_selected));
+    }
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    f.render_stateful_widget(list, area, &mut state);
 }
 
-fn draw_skills_detail_placeholder(f: &mut Frame, area: Rect) {
+fn draw_skill_detail(f: &mut Frame, app: &App, area: Rect) {
+    let lines = if let Some(ref hub) = app.skill_hub {
+        let skills: Vec<_> = hub.skills.values().collect();
+        if app.list_selected < skills.len() {
+            let skill = skills[app.list_selected];
+
+            let mut lines = vec![
+                Line::from(Span::styled(
+                    format!(" {} ", skill.name),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("  Status:   ", Style::default().fg(Color::Yellow)),
+                    Span::styled(
+                        if skill.installed { "Installed ✓" } else { "Not installed" },
+                        Style::default().fg(if skill.installed {
+                            Color::Green
+                        } else {
+                            Color::DarkGray
+                        }),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::styled("  Source:   ", Style::default().fg(Color::Yellow)),
+                    Span::styled(
+                        if skill.source.is_empty() {
+                            "—".to_string()
+                        } else {
+                            skill.source.clone()
+                        },
+                        Style::default().fg(Color::White),
+                    ),
+                ]),
+            ];
+
+            if !skill.description.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled("  Desc:     ", Style::default().fg(Color::Yellow)),
+                    Span::styled(&skill.description, Style::default().fg(Color::White)),
+                ]));
+            }
+
+            if let Some(ref hash) = skill.installed_hash {
+                lines.push(Line::from(vec![
+                    Span::styled("  Hash:     ", Style::default().fg(Color::Yellow)),
+                    Span::styled(hash.clone(), Style::default().fg(Color::DarkGray)),
+                ]));
+            }
+
+            if let Some(ref path) = skill.install_path {
+                lines.push(Line::from(vec![
+                    Span::styled("  Path:     ", Style::default().fg(Color::Yellow)),
+                    Span::styled(
+                        path.display().to_string(),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]));
+            }
+
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                " ── Actions ──────────────────────────",
+                Style::default().fg(Color::DarkGray),
+            )));
+
+            if skill.installed {
+                lines.push(Line::from(Span::styled(
+                    "  u: Update  r: Remove  g: Open GitHub",
+                    Style::default().fg(Color::Yellow),
+                )));
+            } else if !skill.source.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "  i: Install  g: Open GitHub",
+                    Style::default().fg(Color::Yellow),
+                )));
+            }
+
+            lines
+        } else {
+            vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Select a skill to view details",
+                    Style::default().fg(Color::DarkGray),
+                )),
+            ]
+        }
+    } else {
+        vec![Line::from(Span::styled(
+            "  No skill data available",
+            Style::default().fg(Color::DarkGray),
+        ))]
+    };
+
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" Skill Details ")
-        .border_style(Style::default().fg(Color::DarkGray));
-    let text = Paragraph::new("").block(block);
-    f.render_widget(text, area);
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let paragraph = Paragraph::new(lines).block(block);
+    f.render_widget(paragraph, area);
 }
 
 fn draw_sync_placeholder(f: &mut Frame, area: Rect) {
@@ -507,6 +669,10 @@ fn draw_help(f: &mut Frame, area: Rect) {
             Span::styled("  Enter      ", Style::default().fg(Color::Yellow)),
             Span::raw("Open/Edit selected"),
         ]),
+        Line::from(Span::styled(
+            " ── Prompts ─────────────────────",
+            Style::default().fg(Color::DarkGray),
+        )),
         Line::from(vec![
             Span::styled("  n          ", Style::default().fg(Color::Yellow)),
             Span::raw("New prompt"),
@@ -516,17 +682,37 @@ fn draw_help(f: &mut Frame, area: Rect) {
             Span::raw("Delete prompt"),
         ]),
         Line::from(vec![
-            Span::styled("  s          ", Style::default().fg(Color::Yellow)),
-            Span::raw("Sync to agents"),
-        ]),
-        Line::from(vec![
             Span::styled("  e          ", Style::default().fg(Color::Yellow)),
             Span::raw("Edit prompt"),
         ]),
         Line::from(vec![
-            Span::styled("  u          ", Style::default().fg(Color::Yellow)),
-            Span::raw("Update skills"),
+            Span::styled("  s          ", Style::default().fg(Color::Yellow)),
+            Span::raw("Sync to agents"),
         ]),
+        Line::from(Span::styled(
+            " ── Skills ──────────────────────",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(vec![
+            Span::styled("  i          ", Style::default().fg(Color::Yellow)),
+            Span::raw("Install skill"),
+        ]),
+        Line::from(vec![
+            Span::styled("  u          ", Style::default().fg(Color::Yellow)),
+            Span::raw("Update skill"),
+        ]),
+        Line::from(vec![
+            Span::styled("  r          ", Style::default().fg(Color::Yellow)),
+            Span::raw("Remove skill"),
+        ]),
+        Line::from(vec![
+            Span::styled("  g          ", Style::default().fg(Color::Yellow)),
+            Span::raw("Open GitHub source"),
+        ]),
+        Line::from(Span::styled(
+            " ── General ─────────────────────",
+            Style::default().fg(Color::DarkGray),
+        )),
         Line::from(vec![
             Span::styled("  ?          ", Style::default().fg(Color::Yellow)),
             Span::raw("Toggle this help"),
