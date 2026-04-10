@@ -52,18 +52,29 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+      - name: Add ARM64 target
+        run: rustup target add aarch64-apple-darwin
+      - name: Add x86_64 target
+        run: rustup target add x86_64-apple-darwin
       - name: Build macOS ARM64
-        run: cargo build --release
-      - name: Create macOS release archive
+        run: cargo build --release --target aarch64-apple-darwin
+      - name: Build macOS x86_64
+        run: cargo build --release --target x86_64-apple-darwin
+      - name: Create macOS release archives
         run: |
           mkdir -p release
-          cp target/release/agentry release/agentry-aarch64-apple-darwin
+          cp target/aarch64-apple-darwin/release/agentry release/agentry-aarch64-apple-darwin
+          cp target/x86_64-apple-darwin/release/agentry release/agentry-x86_64-apple-darwin
           chmod +x release/*
-          cd release && tar czf agentry-macos-arm64.tar.gz agentry-*
+          cd release
+          tar czf agentry-macos-arm64.tar.gz agentry-aarch64-apple-darwin
+          tar czf agentry-macos-x86_64.tar.gz agentry-x86_64-apple-darwin
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: release/agentry-macos-arm64.tar.gz
+          files: |
+            release/agentry-macos-arm64.tar.gz
+            release/agentry-macos-x86_64.tar.gz
           generate_release_notes: true
 
   release-linux:
@@ -79,11 +90,11 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
       - name: Build Linux x86_64
-        run: cargo build --release
+        run: cargo build --release --target x86_64-unknown-linux-gnu
       - name: Create Linux release archive
         run: |
           mkdir -p release
-          cp target/release/agentry release/agentry-x86_64-unknown-linux-gnu
+          cp target/x86_64-unknown-linux-gnu/release/agentry release/agentry-x86_64-unknown-linux-gnu
           chmod +x release/*
           cd release && tar czf agentry-linux-x86_64.tar.gz agentry-*
       - name: Create GitHub release

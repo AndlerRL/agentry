@@ -93,10 +93,10 @@ The terminal UI features an intro animation with ASCII art and a progress bar wh
 |-----|-----|-------------|
 | Dashboard | `1` | Overview of detected agents and system status |
 | Agents | `2` | Browse detected agents, versions, skills, and config paths |
-| Prompts | `3` | Manage and edit prompts (Phase 2) |
-| Skills | `4` | Browse and install skill hub entries (Phase 4) |
-| Sync | `5` | Plan and execute prompt sync (Phase 3) |
-| OpenClaw | `6` | Manage OpenClaw workspaces (Phase 5) |
+| Prompts | `3` | Manage and edit prompts with vim-like editor |
+| Skills | `4` | Browse and install skill hub entries |
+| Sync | `5` | Plan and execute prompt sync |
+| OpenClaw | `6` | Manage OpenClaw workspaces |
 
 ### Keybindings
 
@@ -115,6 +115,40 @@ The terminal UI features an intro animation with ASCII art and a progress bar wh
 | `:w` / `:q` | Write/quit (vim-like commands) |
 | `?` | Toggle help overlay |
 | `q` | Quit |
+
+## CLI Usage
+
+Run `agentry` without arguments to launch the TUI, or use subcommands for non-interactive mode:
+
+```bash
+# Detect installed agents
+agentry detect
+
+# Sync a specific prompt to all agents
+agentry sync --prompt software-architect
+
+# Sync all prompts (dry run first)
+agentry sync --all --dry-run
+agentry sync --all
+
+# List installed and available skills
+agentry skills list
+
+# Install a skill
+agentry skills install deploy-to-vercel
+
+# Update all installed skills
+agentry skills update
+
+# Remove a skill
+agentry skills remove deploy-to-vercel
+
+# List discovered prompts
+agentry prompts list
+
+# Browse OpenClaw workspaces
+agentry openclaw workspaces
+```
 
 ## Architecture
 
@@ -164,25 +198,46 @@ agentry-acp   ──> agentry-core, agentry-agents, agentry-skills
 
 ## Installation
 
-### From Source
+### Pre-built Binaries (macOS & Linux)
+
+Download the latest release from [GitHub Releases](https://github.com/AndlerRL/agentry/releases):
 
 ```bash
-cargo install --git https://github.com/AndlerRL/agentry
+# macOS (Apple Silicon)
+curl -L https://github.com/AndlerRL/agentry/releases/latest/download/agentry-macos-arm64.tar.gz | tar xz
+chmod +x agentry-aarch64-apple-darwin
+sudo mv agentry-aarch64-apple-darwin /usr/local/bin/agentry
+
+# macOS (Intel)
+curl -L https://github.com/AndlerRL/agentry/releases/latest/download/agentry-macos-x86_64.tar.gz | tar xz
+chmod +x agentry-x86_64-apple-darwin
+sudo mv agentry-x86_64-apple-darwin /usr/local/bin/agentry
+
+# Linux (x86_64)
+curl -L https://github.com/AndlerRL/agentry/releases/latest/download/agentry-linux-x86_64.tar.gz | tar xz
+chmod +x agentry-x86_64-unknown-linux-gnu
+sudo mv agentry-x86_64-unknown-linux-gnu /usr/local/bin/agentry
 ```
 
-### Build Locally
+> **macOS Gatekeeper**: If you see "cannot be opened because it is from an unidentified developer", run:
+> ```bash
+> xattr -d com.apple.quarantine /usr/local/bin/agentry
+> ```
+
+### Install with Cargo
+
+```bash
+cargo install --git https://github.com/AndlerRL/agentry --bin agentry
+```
+
+### Build from Source
 
 ```bash
 git clone https://github.com/AndlerRL/agentry.git
 cd agentry
 cargo build --release
 # Binary at target/release/agentry
-```
-
-### Run Directly
-
-```bash
-cargo run --manifest-path crates/agentry-tui/Cargo.toml
+cp target/release/agentry /usr/local/bin/
 ```
 
 ## Configuration
@@ -211,7 +266,7 @@ repos = []
 | Phase 4 | **Complete** | Skill hub -- browse, install, update, lockfile management, symlink creation |
 | Phase 5 | **Complete** | OpenClaw workspace discovery and `.lobster` workflow management |
 | Phase 6 | **Complete** | ACP protocol -- multi-agent orchestration, capability routing, `.lobster` generation |
-| Phase 7 | **In Progress** | Polish, testing, error handling, docs, CI improvements, release |
+| Phase 7 | **Complete** | Polish, testing, error handling, docs, CI improvements, release |
 
 ## Built With
 
