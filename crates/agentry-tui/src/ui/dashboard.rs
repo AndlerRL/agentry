@@ -69,14 +69,22 @@ pub fn draw_dashboard(f: &mut Frame, app: &App) {
         None => {}
     }
 
-    // Status bar
-    let status = app
-        .status_message
-        .as_deref()
-        .unwrap_or("j/k:navigate  Tab:next-tab  s:sync  q:quit  ?:help");
+    // Status bar — show error message prominently, otherwise show normal status
+    let status = if let Some(ref err) = app.error_message {
+        err.as_str()
+    } else {
+        app.status_message
+            .as_deref()
+            .unwrap_or("j/k:navigate  Tab:next-tab  s:sync  q:quit  ?:help")
+    };
+    let status_color = if app.error_message.is_some() {
+        Color::Red
+    } else {
+        Color::DarkGray
+    };
     let status_bar = Paragraph::new(Line::from(Span::styled(
         format!(" {}", status),
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(status_color),
     )));
     f.render_widget(status_bar, chunks[2]);
 
@@ -137,8 +145,7 @@ fn draw_agent_detail(f: &mut Frame, app: &App, area: Rect) {
     let agent = app.detected_agents.get(app.list_selected);
 
     let lines = if let Some(agent) = agent {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-        let config_path = format!("{}/{}", home, agent.spec.config_dir);
+        let config_path = format!("{}/{}", app.home_dir.display(), agent.spec.config_dir);
         let prompt_info = agent.spec.prompt_filename.to_string();
 
         let mut lines = vec![

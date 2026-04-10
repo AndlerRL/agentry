@@ -67,6 +67,8 @@ pub struct App {
     pub show_help: bool,
     /// Skill action pending confirmation
     pub skill_confirm: Option<SkillConfirmAction>,
+    /// Error message to display in the status bar (cleared on next key press)
+    pub error_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,7 +94,12 @@ impl App {
     pub fn new() -> Self {
         let home_dir = std::env::var("HOME")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("/tmp"));
+            .ok()
+            .or_else(dirs::home_dir)
+            .unwrap_or_else(|| {
+                eprintln!("warning: HOME environment variable not set, falling back to /tmp");
+                PathBuf::from("/tmp")
+            });
 
         Self {
             mode: AppMode::Intro,
@@ -116,6 +123,7 @@ impl App {
             status_message: None,
             show_help: false,
             skill_confirm: None,
+            error_message: None,
         }
     }
 
@@ -252,6 +260,11 @@ impl App {
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
+        // Clear any previous error message on next key press
+        if self.error_message.is_some() {
+            self.error_message = None;
+        }
+
         // If in editor mode, forward keys to editor
         if self.mode == AppMode::Editor {
             if let Some(ref mut editor) = self.editor {
@@ -271,9 +284,13 @@ impl App {
                             let save_path =
                                 self.home_dir.join(".agents").join("prompts").join(&path);
                             if let Some(parent) = save_path.parent() {
-                                let _ = std::fs::create_dir_all(parent);
+                                if let Err(e) = std::fs::create_dir_all(parent) {
+                                    self.error_message = Some(format!("Failed to save: {}", e));
+                                }
                             }
-                            let _ = std::fs::write(&save_path, &content);
+                            if let Err(e) = std::fs::write(&save_path, &content) {
+                                self.error_message = Some(format!("Failed to save: {}", e));
+                            }
                         }
                         editor.message = None;
                     }
@@ -610,7 +627,9 @@ impl App {
                     if !skill.source_url.is_empty() {
                         let url = skill.source_url.clone();
                         self.status_message = Some(format!("Open: {}", url));
-                        // Try to open in browser
+                        // Intentionally ignoring errors: if the browser can't be opened,
+                        // the user already saw the URL in the status message and can
+                        // open it manually. No further action is useful on failure.
                         let _ = std::process::Command::new("open").arg(&url).spawn();
                     }
                 }
@@ -755,7 +774,9 @@ impl App {
 
                 // Save the generated workflow
                 let workflow_dir = self.home_dir.join(".agents").join("workflows");
-                let _ = std::fs::create_dir_all(&workflow_dir);
+                if let Err(e) = std::fs::create_dir_all(&workflow_dir) {
+                    self.error_message = Some(format!("Failed to create workflow dir: {}", e));
+                }
                 let workflow_path = workflow_dir.join(format!("{}.lobster", decomp.workflow.name));
                 if let Err(e) =
                     agentry_acp::orchestrator::save_workflow(&decomp.workflow, &workflow_path)

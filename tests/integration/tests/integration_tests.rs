@@ -3,16 +3,14 @@
 use std::collections::BTreeMap;
 
 use agentry_acp::protocol::{
-    self, dequeue_message, enqueue_message, init_acp_dirs, read_queue,
-    AcpMessage, MessagePriority, PromptPayload, TaskAssignPayload,
+    self, dequeue_message, enqueue_message, init_acp_dirs, read_queue, AcpMessage, MessagePriority,
+    PromptPayload, TaskAssignPayload,
 };
 use agentry_acp::router;
 use agentry_agents::spec;
 use agentry_core::discovery;
 use agentry_core::format::{convert_to, converter_for};
-use agentry_core::models::{
-    AgentSpec, DetectedAgent, PromptFormat, PromptScope, UnifiedPrompt,
-};
+use agentry_core::models::{AgentSpec, DetectedAgent, PromptFormat, PromptScope, UnifiedPrompt};
 use agentry_openclaw::discovery as oc_discovery;
 use agentry_skills::hub::SkillHub;
 use agentry_skills::lockfile;
@@ -132,7 +130,11 @@ fn test_agent_detection_and_sync_pipeline() {
     let plan = planner::plan_sync(&prompt, &agents, home.path());
 
     // The plan should have a mapping for each installed agent
-    assert_eq!(plan.mappings.len(), 2, "expected 2 mappings for 2 installed agents");
+    assert_eq!(
+        plan.mappings.len(),
+        2,
+        "expected 2 mappings for 2 installed agents"
+    );
     assert_eq!(plan.prompt_id, "architect");
 
     // Verify destination paths are correct
@@ -141,7 +143,10 @@ fn test_agent_detection_and_sync_pipeline() {
         .iter()
         .find(|m| m.agent_id == "claude-code")
         .expect("claude-code mapping should exist");
-    assert!(claude_mapping.destination.to_string_lossy().contains(".claude"));
+    assert!(claude_mapping
+        .destination
+        .to_string_lossy()
+        .contains(".claude"));
     assert_eq!(claude_mapping.target_format, PromptFormat::PlainMd);
 
     let gemini_mapping = plan
@@ -149,7 +154,10 @@ fn test_agent_detection_and_sync_pipeline() {
         .iter()
         .find(|m| m.agent_id == "gemini-cli")
         .expect("gemini-cli mapping should exist");
-    assert!(gemini_mapping.destination.to_string_lossy().contains(".gemini"));
+    assert!(gemini_mapping
+        .destination
+        .to_string_lossy()
+        .contains(".gemini"));
     assert_eq!(gemini_mapping.target_format, PromptFormat::PlainMd);
 
     // -- Step 3: Use agentry_sync::executor to execute a dry run
@@ -194,7 +202,11 @@ fn test_skill_lockfile_and_hub_pipeline() {
     lockfile::upsert_skill(&mut lockfile_data, "deploy-to-vercel", entry);
 
     // Also create the skill directory on disk so SkillHub can find it
-    let skill_dir = home.path().join(".agents").join("skills").join("deploy-to-vercel");
+    let skill_dir = home
+        .path()
+        .join(".agents")
+        .join("skills")
+        .join("deploy-to-vercel");
     std::fs::create_dir_all(&skill_dir).unwrap();
     std::fs::write(
         skill_dir.join("SKILL.md"),
@@ -210,7 +222,10 @@ fn test_skill_lockfile_and_hub_pipeline() {
 
     // -- Step 3: Verify skill shows as installed
     let installed = hub.installed();
-    assert!(!installed.is_empty(), "hub should report at least one installed skill");
+    assert!(
+        !installed.is_empty(),
+        "hub should report at least one installed skill"
+    );
 
     let skill = hub
         .get("deploy-to-vercel")
@@ -270,7 +285,10 @@ fn test_prompt_discovery_and_format_conversion() {
 
     // Verify canonical prompt was found
     let coding_style = discovered.iter().find(|p| p.name == "coding-style");
-    assert!(coding_style.is_some(), "coding-style prompt should be discovered");
+    assert!(
+        coding_style.is_some(),
+        "coding-style prompt should be discovered"
+    );
     assert_eq!(coding_style.unwrap().source_format, PromptFormat::PlainMd);
 
     // Verify Claude CLAUDE.md was found
@@ -289,15 +307,18 @@ fn test_prompt_discovery_and_format_conversion() {
     );
 
     // Convert PlainMd -> XmlTagMd
-    let xml_output = convert_to(prompt, PromptFormat::XmlTagMd)
-        .expect("conversion to XmlTagMd should succeed");
+    let xml_output =
+        convert_to(prompt, PromptFormat::XmlTagMd).expect("conversion to XmlTagMd should succeed");
 
     // Verify the architect prompt was discovered with its XML tag format
     let architect = discovered.iter().find(|p| p.name == "architect");
     if let Some(arch) = architect {
         // The architect prompt should have been detected as XmlTagMd
         assert!(
-            matches!(arch.source_format, PromptFormat::XmlTagMd | PromptFormat::FrontmatterMd),
+            matches!(
+                arch.source_format,
+                PromptFormat::XmlTagMd | PromptFormat::FrontmatterMd
+            ),
             "architect should be detected as XmlTagMd or FrontmatterMd, got {:?}",
             arch.source_format
         );
@@ -309,12 +330,21 @@ fn test_prompt_discovery_and_format_conversion() {
     let parsed = converter
         .parse("architect", arch_content, None)
         .expect("XmlTagMd parse should succeed");
-    assert!(!parsed.xml_tags.is_empty(), "should have extracted XML tags");
+    assert!(
+        !parsed.xml_tags.is_empty(),
+        "should have extracted XML tags"
+    );
 
     // Convert parsed XML-tagged prompt to PlainMd
     let plain = convert_to(&parsed, PromptFormat::PlainMd).expect("convert to PlainMd");
-    assert!(!plain.contains("<expertise>"), "plain md should not contain XML tags");
-    assert!(plain.contains("Design systems well"), "plain md should contain body text");
+    assert!(
+        !plain.contains("<expertise>"),
+        "plain md should not contain XML tags"
+    );
+    assert!(
+        plain.contains("Design systems well"),
+        "plain md should contain body text"
+    );
 
     // Suppress unused-variable warning for xml_output
     let _ = xml_output;
@@ -350,9 +380,24 @@ fn test_acp_message_queue_roundtrip() {
     init_acp_dirs(home.path()).expect("init_acp_dirs should succeed");
 
     // Verify directory structure was created
-    assert!(home.path().join(".agents").join("acp").join("queue").exists());
-    assert!(home.path().join(".agents").join("acp").join("inbox").exists());
-    assert!(home.path().join(".agents").join("acp").join("outbox").exists());
+    assert!(home
+        .path()
+        .join(".agents")
+        .join("acp")
+        .join("queue")
+        .exists());
+    assert!(home
+        .path()
+        .join(".agents")
+        .join("acp")
+        .join("inbox")
+        .exists());
+    assert!(home
+        .path()
+        .join(".agents")
+        .join("acp")
+        .join("outbox")
+        .exists());
 
     // -- Step 2: Create a message, serialize it, enqueue it
     let msg = AcpMessage::PromptRequest(PromptPayload {
@@ -369,7 +414,10 @@ fn test_acp_message_queue_roundtrip() {
     let json = serde_json::to_string(&msg).expect("serialization should succeed");
     let deserialized: AcpMessage =
         serde_json::from_str(&json).expect("deserialization should succeed");
-    assert_eq!(msg, deserialized, "round-tripped message should equal original");
+    assert_eq!(
+        msg, deserialized,
+        "round-tripped message should equal original"
+    );
 
     // Enqueue the message
     let msg_id = enqueue_message(home.path(), &msg).expect("enqueue should succeed");
@@ -386,7 +434,10 @@ fn test_acp_message_queue_roundtrip() {
     assert!(removed, "dequeue should report the message was removed");
 
     let queue_after = read_queue(home.path()).expect("read_queue after dequeue should succeed");
-    assert!(queue_after.is_empty(), "queue should be empty after dequeue");
+    assert!(
+        queue_after.is_empty(),
+        "queue should be empty after dequeue"
+    );
 
     // -- Bonus: also test enqueue + deliver_to_inbox + read_inbox
     let task_msg = AcpMessage::TaskAssign(TaskAssignPayload {
@@ -404,13 +455,13 @@ fn test_acp_message_queue_roundtrip() {
     protocol::deliver_to_inbox(home.path(), "claude-code", &task_msg)
         .expect("deliver_to_inbox should succeed");
 
-    let inbox = protocol::read_inbox(home.path(), "claude-code")
-        .expect("read_inbox should succeed");
+    let inbox =
+        protocol::read_inbox(home.path(), "claude-code").expect("read_inbox should succeed");
     assert_eq!(inbox.len(), 1, "inbox should have one message");
     assert_eq!(inbox[0].type_name(), "TaskAssign");
 
-    let cleared = protocol::clear_inbox(home.path(), "claude-code")
-        .expect("clear_inbox should succeed");
+    let cleared =
+        protocol::clear_inbox(home.path(), "claude-code").expect("clear_inbox should succeed");
     assert_eq!(cleared, 1, "should have cleared 1 message");
 }
 
@@ -497,7 +548,10 @@ fn test_acp_router_capability_matrix() {
 
     // -- Step 3: Verify routing logic works
     let routed = router::route_prompt(&caps, "code_review", "review this code");
-    assert!(routed.is_some(), "routing should find a match for code_review");
+    assert!(
+        routed.is_some(),
+        "routing should find a match for code_review"
+    );
     assert_eq!(
         routed.unwrap().agent_id,
         "claude-code",
@@ -512,12 +566,27 @@ fn test_acp_router_capability_matrix() {
 
     // -- Step 4: Verify the static spec list covers all known agents
     let known_ids: Vec<&str> = specs.iter().map(|s| s.id.as_str()).collect();
-    assert!(known_ids.contains(&"claude-code"), "specs should include claude-code");
-    assert!(known_ids.contains(&"gemini-cli"), "specs should include gemini-cli");
-    assert!(known_ids.contains(&"continue"), "specs should include continue");
+    assert!(
+        known_ids.contains(&"claude-code"),
+        "specs should include claude-code"
+    );
+    assert!(
+        known_ids.contains(&"gemini-cli"),
+        "specs should include gemini-cli"
+    );
+    assert!(
+        known_ids.contains(&"continue"),
+        "specs should include continue"
+    );
     assert!(known_ids.contains(&"codex"), "specs should include codex");
-    assert!(known_ids.contains(&"openclaw"), "specs should include openclaw");
-    assert!(known_ids.contains(&"firebender"), "specs should include firebender");
+    assert!(
+        known_ids.contains(&"openclaw"),
+        "specs should include openclaw"
+    );
+    assert!(
+        known_ids.contains(&"firebender"),
+        "specs should include firebender"
+    );
 
     // Suppress unused variable warnings for agents constructed for documentation
     let _ = (claude_agent, gemini_agent, home);

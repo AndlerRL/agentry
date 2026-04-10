@@ -279,10 +279,7 @@ mod tests {
     #[test]
     fn detect_symlink_pattern_nonexistent_dir() {
         let pattern = detect_symlink_pattern(Path::new("/nonexistent/path/skills"));
-        assert!(
-            pattern.is_none(),
-            "should return None for nonexistent dir"
-        );
+        assert!(pattern.is_none(), "should return None for nonexistent dir");
     }
 
     #[test]
@@ -350,7 +347,10 @@ mod tests {
         let home = dirs_home();
         // We can't assert a specific value, but it should be a valid path
         // and not empty.
-        assert!(!home.as_os_str().is_empty(), "dirs_home should return a non-empty path");
+        assert!(
+            !home.as_os_str().is_empty(),
+            "dirs_home should return a non-empty path"
+        );
         // If HOME is set, it should match; otherwise it should fall back to /tmp
         if let Ok(home_var) = std::env::var("HOME") {
             assert_eq!(home, PathBuf::from(home_var));

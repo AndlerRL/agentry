@@ -90,10 +90,7 @@ mod tests {
 
     #[test]
     fn agents_returns_all() {
-        let agents = vec![
-            make_agent("alpha", true),
-            make_agent("beta", false),
-        ];
+        let agents = vec![make_agent("alpha", true), make_agent("beta", false)];
         let registry = AgentRegistry::from_list(agents);
         assert_eq!(registry.agents().len(), 2);
         assert_eq!(registry.agents()[0].spec.id, "alpha");
@@ -118,20 +115,14 @@ mod tests {
 
     #[test]
     fn installed_returns_empty_when_none() {
-        let agents = vec![
-            make_agent("alpha", false),
-            make_agent("beta", false),
-        ];
+        let agents = vec![make_agent("alpha", false), make_agent("beta", false)];
         let registry = AgentRegistry::from_list(agents);
         assert!(registry.installed().is_empty());
     }
 
     #[test]
     fn get_by_id_finds_existing() {
-        let agents = vec![
-            make_agent("alpha", true),
-            make_agent("beta", false),
-        ];
+        let agents = vec![make_agent("alpha", true), make_agent("beta", false)];
         let registry = AgentRegistry::from_list(agents);
         let found = registry.get_by_id("beta");
         assert!(found.is_some());
@@ -159,10 +150,7 @@ mod tests {
 
     #[test]
     fn installed_count_zero_when_none() {
-        let agents = vec![
-            make_agent("alpha", false),
-            make_agent("beta", false),
-        ];
+        let agents = vec![make_agent("alpha", false), make_agent("beta", false)];
         let registry = AgentRegistry::from_list(agents);
         assert_eq!(registry.installed_count(), 0);
     }
@@ -222,7 +210,11 @@ mod tests {
             make_agent("third", true),
         ];
         let registry = AgentRegistry::from_list(agents);
-        let ids: Vec<&str> = registry.agents().iter().map(|a| a.spec.id.as_str()).collect();
+        let ids: Vec<&str> = registry
+            .agents()
+            .iter()
+            .map(|a| a.spec.id.as_str())
+            .collect();
         assert_eq!(ids, vec!["first", "second", "third"]);
     }
 }

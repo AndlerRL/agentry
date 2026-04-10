@@ -67,7 +67,12 @@ mod tests {
     #[test]
     fn match_exhaustiveness() {
         // Ensure all variants are covered in a match
-        let modes = [EditorMode::Normal, EditorMode::Insert, EditorMode::Visual, EditorMode::Command];
+        let modes = [
+            EditorMode::Normal,
+            EditorMode::Insert,
+            EditorMode::Visual,
+            EditorMode::Command,
+        ];
         for mode in modes {
             let label = match mode {
                 EditorMode::Normal => "normal",

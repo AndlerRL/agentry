@@ -84,6 +84,20 @@ enum OpenclawCommands {
     Workspaces,
 }
 
+/// Resolve the user's home directory, preferring $HOME, falling back to
+/// `dirs::home_dir()`, and finally `/tmp` as a last resort. Emits a warning
+/// to stderr when neither $HOME nor a platform home directory can be found.
+fn resolve_home() -> std::path::PathBuf {
+    std::env::var("HOME")
+        .map(std::path::PathBuf::from)
+        .ok()
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| {
+            eprintln!("warning: HOME environment variable not set, falling back to /tmp");
+            std::path::PathBuf::from("/tmp")
+        })
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -151,9 +165,7 @@ async fn cmd_sync(prompt_name: Option<String>, all: bool, dry_run: bool) -> Resu
     use agentry_sync::executor::execute_sync;
     use agentry_sync::planner::plan_sync;
 
-    let home = std::env::var("HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_default();
+    let home = resolve_home();
     let project_dirs = vec![home.join("Development")];
 
     let agents = agentry_agents::detect_all_agents().await;
@@ -189,9 +201,7 @@ async fn cmd_sync(prompt_name: Option<String>, all: bool, dry_run: bool) -> Resu
 }
 
 async fn cmd_skills(action: Option<SkillsCommands>) -> Result<()> {
-    let home = std::env::var("HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_default();
+    let home = resolve_home();
 
     match action {
         Some(SkillsCommands::List) => {
@@ -313,9 +323,7 @@ async fn cmd_skills(action: Option<SkillsCommands>) -> Result<()> {
 async fn cmd_prompts(action: Option<PromptsCommands>) -> Result<()> {
     use agentry_core::discovery::discover_prompts;
 
-    let home = std::env::var("HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_default();
+    let home = resolve_home();
     let project_dirs = vec![home.join("Development")];
 
     match action {
@@ -349,9 +357,7 @@ async fn cmd_prompts(action: Option<PromptsCommands>) -> Result<()> {
 }
 
 async fn cmd_openclaw(action: Option<OpenclawCommands>) -> Result<()> {
-    let home = std::env::var("HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_default();
+    let home = resolve_home();
 
     match action {
         Some(OpenclawCommands::Workspaces) => {

@@ -45,6 +45,9 @@ git2 = "0.19"
 # Crypto
 sha1 = "0.10"
 
+# Platform
+dirs = "6"
+
 # Internal crates
 agentry-core = { path = "crates/agentry-core" }
 agentry-agents = { path = "crates/agentry-agents" }

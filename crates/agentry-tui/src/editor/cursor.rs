@@ -189,7 +189,7 @@ mod tests {
         let mut cursor = Cursor { row: 0, col: 1 };
         cursor.move_right(&buf);
         assert_eq!(cursor.col, 2); // advances to col 2 (one past last char)
-        // Now at max_col, further moves should not advance
+                                   // Now at max_col, further moves should not advance
         cursor.move_right(&buf);
         assert_eq!(cursor.col, 2);
     }
