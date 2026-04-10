@@ -8,6 +8,7 @@ members = [
     "crates/agentry-openclaw",
     "crates/agentry-acp",
     "crates/agentry-tui",
+    "tests/integration",
 ]
 
 [workspace.package]

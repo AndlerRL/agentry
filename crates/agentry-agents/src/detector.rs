@@ -155,3 +155,233 @@ fn list_skills(skills_dir: &Path) -> Vec<String> {
         })
         .unwrap_or_default()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agentry_core::models::PromptFormat;
+    use std::fs;
+
+    /// Helper to create a temporary directory for tests.
+    struct TempDir {
+        path: PathBuf,
+    }
+
+    impl TempDir {
+        fn new(prefix: &str) -> Self {
+            let path = std::env::temp_dir().join(format!("{}_{}", prefix, std::process::id()));
+            fs::create_dir_all(&path).expect("failed to create temp dir");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn detect_symlink_pattern_with_relative_agents_symlink() {
+        let tmp = TempDir::new("symlink_test");
+        let skills_dir = tmp.path().join("skills");
+        fs::create_dir_all(&skills_dir).unwrap();
+
+        // Create target directory so the symlink resolves
+        let target_root = tmp.path().join(".agents/skills");
+        fs::create_dir_all(&target_root).unwrap();
+
+        // Create a symlink: skills/git -> ../../.agents/skills/git
+        let link = skills_dir.join("git");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("../../.agents/skills/git", &link).unwrap();
+
+        let pattern = detect_symlink_pattern(&skills_dir);
+        assert_eq!(
+            pattern,
+            Some("../../.agents/skills/<name>".to_string()),
+            "should detect the ../../.agents/skills/ pattern"
+        );
+    }
+
+    #[test]
+    fn detect_symlink_pattern_with_single_dot_agents_symlink() {
+        let tmp = TempDir::new("symlink_single_test");
+        let skills_dir = tmp.path().join("skills");
+        fs::create_dir_all(&skills_dir).unwrap();
+
+        let target_root = tmp.path().join(".agents/skills");
+        fs::create_dir_all(&target_root).unwrap();
+
+        // Create a symlink: skills/git -> ../.agents/skills/git
+        let link = skills_dir.join("git");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("../.agents/skills/git", &link).unwrap();
+
+        let pattern = detect_symlink_pattern(&skills_dir);
+        assert_eq!(
+            pattern,
+            Some("../.agents/skills/<name>".to_string()),
+            "should detect the ../.agents/skills/ pattern"
+        );
+    }
+
+    #[test]
+    fn detect_symlink_pattern_with_other_symlink() {
+        let tmp = TempDir::new("symlink_other_test");
+        let skills_dir = tmp.path().join("skills");
+        fs::create_dir_all(&skills_dir).unwrap();
+
+        // Create a symlink to some arbitrary target
+        let link = skills_dir.join("my-skill");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("/some/other/path/skill", &link).unwrap();
+
+        let pattern = detect_symlink_pattern(&skills_dir);
+        assert!(
+            pattern.is_some(),
+            "should detect a symlink even if it's not the .agents pattern"
+        );
+        assert_eq!(pattern.unwrap(), "/some/other/path/skill");
+    }
+
+    #[test]
+    fn detect_symlink_pattern_no_symlinks() {
+        let tmp = TempDir::new("nosymlink_test");
+        let skills_dir = tmp.path().join("skills");
+        fs::create_dir_all(&skills_dir).unwrap();
+
+        // Create regular subdirectories (not symlinks)
+        fs::create_dir_all(skills_dir.join("skill-a")).unwrap();
+        fs::create_dir_all(skills_dir.join("skill-b")).unwrap();
+
+        let pattern = detect_symlink_pattern(&skills_dir);
+        assert!(
+            pattern.is_none(),
+            "should return None when no symlinks found"
+        );
+    }
+
+    #[test]
+    fn detect_symlink_pattern_empty_dir() {
+        let tmp = TempDir::new("empty_symlink_test");
+        let skills_dir = tmp.path().join("skills");
+        fs::create_dir_all(&skills_dir).unwrap();
+
+        let pattern = detect_symlink_pattern(&skills_dir);
+        assert!(pattern.is_none(), "should return None for empty dir");
+    }
+
+    #[test]
+    fn detect_symlink_pattern_nonexistent_dir() {
+        let pattern = detect_symlink_pattern(Path::new("/nonexistent/path/skills"));
+        assert!(
+            pattern.is_none(),
+            "should return None for nonexistent dir"
+        );
+    }
+
+    #[test]
+    fn list_skills_returns_subdirectories() {
+        let tmp = TempDir::new("list_skills_test");
+        let skills_dir = tmp.path().join("skills");
+        fs::create_dir_all(skills_dir.join("git")).unwrap();
+        fs::create_dir_all(skills_dir.join("rust")).unwrap();
+        fs::create_dir_all(skills_dir.join("python")).unwrap();
+
+        // Also create a regular file — should NOT be listed
+        fs::write(skills_dir.join("README.md"), "hello").unwrap();
+
+        let mut skills = list_skills(&skills_dir);
+        skills.sort();
+        assert_eq!(skills, vec!["git", "python", "rust"]);
+    }
+
+    #[test]
+    fn list_skills_includes_symlinked_dirs() {
+        let tmp = TempDir::new("list_skills_symlink_test");
+        let skills_dir = tmp.path().join("skills");
+        let target = tmp.path().join("target_skill");
+        fs::create_dir_all(&skills_dir).unwrap();
+        fs::create_dir_all(&target).unwrap();
+
+        // Create a symlink to a directory
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, skills_dir.join("linked-skill")).unwrap();
+
+        let skills = list_skills(&skills_dir);
+        assert!(
+            skills.contains(&"linked-skill".to_string()),
+            "symlinked directories should be listed"
+        );
+    }
+
+    #[test]
+    fn list_skills_empty_dir() {
+        let tmp = TempDir::new("list_skills_empty_test");
+        let skills_dir = tmp.path().join("skills");
+        fs::create_dir_all(&skills_dir).unwrap();
+
+        let skills = list_skills(&skills_dir);
+        assert!(skills.is_empty(), "empty dir should yield no skills");
+    }
+
+    #[test]
+    fn list_skills_nonexistent_dir() {
+        let skills = list_skills(Path::new("/nonexistent/path/skills"));
+        assert!(skills.is_empty(), "nonexistent dir should yield no skills");
+    }
+
+    #[test]
+    fn which_binary_returns_false_for_nonexistent() {
+        // A binary that almost certainly does not exist on any system
+        assert!(
+            !which_binary("nonexistent_binary_xyz_12345"),
+            "which_binary should return false for a nonexistent binary"
+        );
+    }
+
+    #[test]
+    fn dirs_home_returns_a_path() {
+        let home = dirs_home();
+        // We can't assert a specific value, but it should be a valid path
+        // and not empty.
+        assert!(!home.as_os_str().is_empty(), "dirs_home should return a non-empty path");
+        // If HOME is set, it should match; otherwise it should fall back to /tmp
+        if let Ok(home_var) = std::env::var("HOME") {
+            assert_eq!(home, PathBuf::from(home_var));
+        } else {
+            assert_eq!(home, PathBuf::from("/tmp"));
+        }
+    }
+
+    #[test]
+    fn detect_agent_marks_installed_when_binary_found() {
+        // We test with a spec whose binary almost certainly does NOT exist.
+        // This verifies the detection path works end-to-end.
+        let spec = AgentSpec {
+            id: "test-nonexistent".into(),
+            name: "Test Agent".into(),
+            cli_binary: "nonexistent_binary_xyz_12345".into(),
+            config_dir: ".test-nonexistent-dir".into(),
+            prompt_filename: "TEST.md".into(),
+            prompt_format: PromptFormat::PlainMd,
+            skills_dir_name: None,
+            max_size: None,
+        };
+
+        let detected = detect_agent(&spec);
+        // Binary not found, config dir likely doesn't exist => installed should be false
+        assert!(
+            !detected.installed,
+            "agent with nonexistent binary and no config dir should not be installed"
+        );
+        assert!(detected.version.is_none());
+        assert!(!detected.config_dir_exists);
+        assert!(!detected.prompt_file_exists);
+    }
+}

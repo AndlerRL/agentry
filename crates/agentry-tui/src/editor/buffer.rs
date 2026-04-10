@@ -102,3 +102,318 @@ impl std::fmt::Display for Buffer {
         write!(f, "{}", self.content())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_creates_buffer_with_one_empty_line() {
+        let buf = Buffer::new();
+        assert_eq!(buf.line_count(), 1);
+        assert_eq!(buf.get_line(0), "");
+    }
+
+    #[test]
+    fn from_content_empty_string_has_one_empty_line() {
+        let buf = Buffer::from_content("");
+        assert_eq!(buf.line_count(), 1);
+        assert_eq!(buf.get_line(0), "");
+    }
+
+    #[test]
+    fn from_content_single_line_no_trailing_newline() {
+        let buf = Buffer::from_content("hello");
+        assert_eq!(buf.line_count(), 1);
+        assert_eq!(buf.get_line(0), "hello");
+    }
+
+    #[test]
+    fn from_content_two_lines() {
+        let buf = Buffer::from_content("hello\nworld");
+        assert_eq!(buf.line_count(), 2);
+        assert_eq!(buf.get_line(0), "hello");
+        assert_eq!(buf.get_line(1), "world");
+    }
+
+    #[test]
+    fn from_content_trailing_newline() {
+        // "hello\n" -> lines() gives ["hello"], trailing newline is dropped by str::lines()
+        let buf = Buffer::from_content("hello\n");
+        assert_eq!(buf.line_count(), 1);
+        assert_eq!(buf.get_line(0), "hello");
+    }
+
+    #[test]
+    fn from_content_multiple_lines() {
+        let buf = Buffer::from_content("a\nb\nc");
+        assert_eq!(buf.line_count(), 3);
+        assert_eq!(buf.get_line(0), "a");
+        assert_eq!(buf.get_line(1), "b");
+        assert_eq!(buf.get_line(2), "c");
+    }
+
+    #[test]
+    fn line_count_works() {
+        let buf = Buffer::from_content("one\ntwo\nthree");
+        assert_eq!(buf.line_count(), 3);
+    }
+
+    #[test]
+    fn get_line_out_of_bounds_returns_empty() {
+        let buf = Buffer::from_content("hello");
+        assert_eq!(buf.get_line(5), "");
+    }
+
+    #[test]
+    fn line_len_works() {
+        let buf = Buffer::from_content("hi\nworld");
+        assert_eq!(buf.line_len(0), 2);
+        assert_eq!(buf.line_len(1), 5);
+        assert_eq!(buf.line_len(999), 0); // out of bounds
+    }
+
+    #[test]
+    fn lines_iterator_yields_all_lines() {
+        let buf = Buffer::from_content("aa\nbb\ncc");
+        let collected: Vec<&str> = buf.lines().collect();
+        assert_eq!(collected, vec!["aa", "bb", "cc"]);
+    }
+
+    #[test]
+    fn insert_char_at_beginning() {
+        let mut buf = Buffer::from_content("ello");
+        buf.insert_char_at(0, 0, 'h');
+        assert_eq!(buf.get_line(0), "hello");
+    }
+
+    #[test]
+    fn insert_char_at_middle() {
+        let mut buf = Buffer::from_content("hllo");
+        buf.insert_char_at(0, 1, 'e');
+        assert_eq!(buf.get_line(0), "hello");
+    }
+
+    #[test]
+    fn insert_char_at_end() {
+        let mut buf = Buffer::from_content("hell");
+        buf.insert_char_at(0, 4, 'o');
+        assert_eq!(buf.get_line(0), "hello");
+    }
+
+    #[test]
+    fn insert_char_at_out_of_bounds_row_ignored() {
+        let mut buf = Buffer::from_content("hello");
+        buf.insert_char_at(5, 0, 'x');
+        assert_eq!(buf.get_line(0), "hello");
+        assert_eq!(buf.line_count(), 1);
+    }
+
+    #[test]
+    fn insert_char_at_out_of_bounds_col_ignored() {
+        let mut buf = Buffer::from_content("hi");
+        buf.insert_char_at(0, 10, 'x'); // col beyond line len, should be ignored
+        assert_eq!(buf.get_line(0), "hi");
+    }
+
+    #[test]
+    fn delete_char_at_removes_char() {
+        let mut buf = Buffer::from_content("hello");
+        buf.delete_char_at(0, 1); // delete 'e'
+        assert_eq!(buf.get_line(0), "hllo");
+    }
+
+    #[test]
+    fn delete_char_at_beginning() {
+        let mut buf = Buffer::from_content("abc");
+        buf.delete_char_at(0, 0);
+        assert_eq!(buf.get_line(0), "bc");
+    }
+
+    #[test]
+    fn delete_char_at_end() {
+        let mut buf = Buffer::from_content("abc");
+        buf.delete_char_at(0, 2);
+        assert_eq!(buf.get_line(0), "ab");
+    }
+
+    #[test]
+    fn delete_char_at_out_of_bounds_ignored() {
+        let mut buf = Buffer::from_content("abc");
+        buf.delete_char_at(0, 3); // col == len, out of bounds for removal
+        assert_eq!(buf.get_line(0), "abc");
+    }
+
+    #[test]
+    fn delete_char_at_out_of_bounds_row_ignored() {
+        let mut buf = Buffer::from_content("abc");
+        buf.delete_char_at(5, 0);
+        assert_eq!(buf.get_line(0), "abc");
+    }
+
+    #[test]
+    fn insert_newline_at_splits_line() {
+        let mut buf = Buffer::from_content("helloworld");
+        buf.insert_newline_at(0, 5);
+        assert_eq!(buf.line_count(), 2);
+        assert_eq!(buf.get_line(0), "hello");
+        assert_eq!(buf.get_line(1), "world");
+    }
+
+    #[test]
+    fn insert_newline_at_beginning_of_line() {
+        let mut buf = Buffer::from_content("hello");
+        buf.insert_newline_at(0, 0);
+        assert_eq!(buf.line_count(), 2);
+        assert_eq!(buf.get_line(0), "");
+        assert_eq!(buf.get_line(1), "hello");
+    }
+
+    #[test]
+    fn insert_newline_at_end_of_line() {
+        let mut buf = Buffer::from_content("hello");
+        buf.insert_newline_at(0, 5);
+        assert_eq!(buf.line_count(), 2);
+        assert_eq!(buf.get_line(0), "hello");
+        assert_eq!(buf.get_line(1), "");
+    }
+
+    #[test]
+    fn insert_newline_at_out_of_bounds_row_ignored() {
+        let mut buf = Buffer::from_content("hello");
+        buf.insert_newline_at(5, 0);
+        assert_eq!(buf.line_count(), 1);
+    }
+
+    #[test]
+    fn insert_newline_below_adds_empty_line() {
+        let mut buf = Buffer::from_content("line1\nline2");
+        buf.insert_newline_below(0);
+        assert_eq!(buf.line_count(), 3);
+        assert_eq!(buf.get_line(0), "line1");
+        assert_eq!(buf.get_line(1), "");
+        assert_eq!(buf.get_line(2), "line2");
+    }
+
+    #[test]
+    fn insert_newline_above_adds_empty_line() {
+        let mut buf = Buffer::from_content("line1\nline2");
+        buf.insert_newline_above(1);
+        assert_eq!(buf.line_count(), 3);
+        assert_eq!(buf.get_line(0), "line1");
+        assert_eq!(buf.get_line(1), "");
+        assert_eq!(buf.get_line(2), "line2");
+    }
+
+    #[test]
+    fn insert_newline_above_at_row_zero() {
+        let mut buf = Buffer::from_content("hello");
+        buf.insert_newline_above(0);
+        assert_eq!(buf.line_count(), 2);
+        assert_eq!(buf.get_line(0), "");
+        assert_eq!(buf.get_line(1), "hello");
+    }
+
+    #[test]
+    fn delete_line_on_multi_line_buffer_removes_line() {
+        let mut buf = Buffer::from_content("line1\nline2\nline3");
+        buf.delete_line(1);
+        assert_eq!(buf.line_count(), 2);
+        assert_eq!(buf.get_line(0), "line1");
+        assert_eq!(buf.get_line(1), "line3");
+    }
+
+    #[test]
+    fn delete_line_on_single_line_buffer_clears_it() {
+        let mut buf = Buffer::from_content("hello");
+        buf.delete_line(0);
+        assert_eq!(buf.line_count(), 1);
+        assert_eq!(buf.get_line(0), "");
+    }
+
+    #[test]
+    fn delete_line_first_line() {
+        let mut buf = Buffer::from_content("first\nsecond");
+        buf.delete_line(0);
+        assert_eq!(buf.line_count(), 1);
+        assert_eq!(buf.get_line(0), "second");
+    }
+
+    #[test]
+    fn delete_line_last_line() {
+        let mut buf = Buffer::from_content("first\nsecond");
+        buf.delete_line(1);
+        assert_eq!(buf.line_count(), 1);
+        assert_eq!(buf.get_line(0), "first");
+    }
+
+    #[test]
+    fn join_lines_merges_two_lines() {
+        let mut buf = Buffer::from_content("hello\nworld");
+        buf.join_lines(0);
+        assert_eq!(buf.line_count(), 1);
+        assert_eq!(buf.get_line(0), "helloworld");
+    }
+
+    #[test]
+    fn join_lines_last_row_does_nothing() {
+        let mut buf = Buffer::from_content("hello\nworld");
+        buf.join_lines(1); // no row after this
+        assert_eq!(buf.line_count(), 2);
+        assert_eq!(buf.get_line(0), "hello");
+        assert_eq!(buf.get_line(1), "world");
+    }
+
+    #[test]
+    fn join_lines_out_of_bounds_does_nothing() {
+        let mut buf = Buffer::from_content("hello\nworld");
+        buf.join_lines(5);
+        assert_eq!(buf.line_count(), 2);
+    }
+
+    #[test]
+    fn content_reconstructs_original() {
+        let original = "hello\nworld";
+        let buf = Buffer::from_content(original);
+        assert_eq!(buf.content(), original);
+    }
+
+    #[test]
+    fn content_single_line() {
+        let buf = Buffer::from_content("just one line");
+        assert_eq!(buf.content(), "just one line");
+    }
+
+    #[test]
+    fn content_empty_buffer() {
+        let buf = Buffer::new();
+        assert_eq!(buf.content(), "");
+    }
+
+    #[test]
+    fn display_trait_formats_content() {
+        let buf = Buffer::from_content("abc\ndef");
+        assert_eq!(format!("{}", buf), "abc\ndef");
+    }
+
+    #[test]
+    fn display_trait_empty_buffer() {
+        let buf = Buffer::new();
+        assert_eq!(format!("{}", buf), "");
+    }
+
+    #[test]
+    fn multiple_operations_consistency() {
+        let mut buf = Buffer::new();
+        buf.insert_char_at(0, 0, 'a');
+        buf.insert_char_at(0, 1, 'b');
+        buf.insert_char_at(0, 2, 'c');
+        assert_eq!(buf.get_line(0), "abc");
+        buf.insert_newline_at(0, 1);
+        assert_eq!(buf.get_line(0), "a");
+        assert_eq!(buf.get_line(1), "bc");
+        buf.join_lines(0);
+        assert_eq!(buf.get_line(0), "abc");
+        assert_eq!(buf.line_count(), 1);
+    }
+}
