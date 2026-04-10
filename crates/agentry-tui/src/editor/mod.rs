@@ -24,6 +24,8 @@ pub struct Editor {
     undo_stack: VecDeque<String>,
     /// Max undo depth
     max_undo: usize,
+    /// Scroll offset (first visible line in viewport)
+    pub scroll_offset: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +49,7 @@ impl Editor {
             search_direction: SearchDirection::Forward,
             undo_stack: VecDeque::new(),
             max_undo: 100,
+            scroll_offset: 0,
         }
     }
 
@@ -359,5 +362,16 @@ impl Editor {
             "{} │ {}:{}{} │ L{},C{}",
             mode, filename, line, modified, line, col
         )
+    }
+
+    /// Update scroll offset so the cursor remains visible in the viewport.
+    /// Uses a 5-line context margin at top/bottom of viewport.
+    pub fn ensure_cursor_visible(&mut self, viewport_height: usize) {
+        let margin = 5.min(viewport_height / 4);
+        if self.cursor.row < self.scroll_offset + margin {
+            self.scroll_offset = self.cursor.row.saturating_sub(margin);
+        } else if self.cursor.row >= self.scroll_offset + viewport_height - margin {
+            self.scroll_offset = self.cursor.row + margin + 1 - viewport_height;
+        }
     }
 }
