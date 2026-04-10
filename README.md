@@ -29,9 +29,9 @@
 # agentry — The Multi-Agent Prompt Manager
 
 [![Crates.io](https://img.shields.io/crates/v/agentry-tui.svg)](https://crates.io/crates/agentry-tui)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org/)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/AndlerRL/agentry/ci.yml?branch=main)](https://github.com/AndlerRL/agentry/actions)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/AndlerRL/agentry/ci.yml?branch=master)](https://github.com/AndlerRL/agentry/actions)
 
 > One source of truth for prompts. Format-aware sync to every agent CLI.
 
@@ -206,11 +206,12 @@ repos = []
 | Phase | Status | Scope |
 |-------|--------|-------|
 | Phase 1 | **Complete** | Core scaffolding, agent detection, TUI shell with intro animation and dashboard |
-| Phase 2 | Planned | Prompt editor, unified prompt management, format conversion |
-| Phase 3 | Planned | Sync engine -- planner, executor, dry-run, conflict resolution |
-| Phase 4 | Planned | Skill hub -- browse, install, update, lockfile management |
-| Phase 5 | Planned | OpenClaw workspace discovery and `.lobster` workflow management |
-| Phase 6 | Planned | ACP protocol -- multi-agent orchestration and message routing |
+| Phase 2 | **Complete** | Prompt editor, unified prompt management, format conversion |
+| Phase 3 | **Complete** | Sync engine -- planner, executor, dry-run, conflict resolution, project-level sync |
+| Phase 4 | **Complete** | Skill hub -- browse, install, update, lockfile management, symlink creation |
+| Phase 5 | **Complete** | OpenClaw workspace discovery and `.lobster` workflow management |
+| Phase 6 | **Complete** | ACP protocol -- multi-agent orchestration, capability routing, `.lobster` generation |
+| Phase 7 | **In Progress** | Polish, testing, error handling, docs, CI improvements, release |
 
 ## Built With
 
