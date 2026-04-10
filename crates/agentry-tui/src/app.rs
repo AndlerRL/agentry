@@ -43,6 +43,8 @@ pub struct App {
     pub sync_results: Vec<SyncResultEntry>,
     /// OpenClaw workspace data
     pub openclaw_state: Option<OpenClawState>,
+    /// ACP capability matrix
+    pub acp_capabilities: Vec<agentry_acp::protocol::AgentCapability>,
     /// Editor state (when editing a prompt)
     pub editor: Option<Editor>,
     /// New prompt name (when creating a new prompt)
@@ -102,6 +104,7 @@ impl App {
             agent_skills_dirs: Vec::new(),
             sync_results: Vec::new(),
             openclaw_state: None,
+            acp_capabilities: Vec::new(),
             editor: None,
             new_prompt_name: None,
             delete_confirm: None,
@@ -135,6 +138,9 @@ impl App {
 
         // Discover OpenClaw workspaces
         self.discover_openclaw();
+
+        // Build ACP capability matrix
+        self.discover_capabilities();
 
         // Main event loop
         while !self.should_quit {
@@ -195,6 +201,12 @@ impl App {
                 });
                 self.status_message = Some(format!("OpenClaw: {}", e));
             }
+        }
+    }
+
+    fn discover_capabilities(&mut self) {
+        if let Ok(caps) = agentry_acp::router::build_capability_matrix(&self.home_dir) {
+            self.acp_capabilities = caps;
         }
     }
 
@@ -385,6 +397,7 @@ impl App {
             KeyCode::Char('g') => self.on_github(),
             KeyCode::Char('c') => self.on_create_workspace(),
             KeyCode::Char('a') => self.on_add_agent(),
+            KeyCode::Char('w') => self.on_workflow(),
             _ => {}
         }
         Ok(())
@@ -709,6 +722,42 @@ impl App {
             } else {
                 self.status_message = Some("OpenClaw not installed".into());
             }
+        }
+    }
+
+    fn on_workflow(&mut self) {
+        if self.tab_index == 4 {
+            // Sync tab — trigger workflow for current sync entry
+            if !self.acp_capabilities.is_empty() {
+                // Use the currently selected sync result as the task context
+                let task = if self.list_selected < self.sync_results.len() {
+                    format!("Sync {} to {}", self.sync_results[self.list_selected].prompt_name, self.sync_results[self.list_selected].agent_id)
+                } else {
+                    "Sync all prompts".to_string()
+                };
+                let decomp = agentry_acp::orchestrator::decompose_task(&task, &self.acp_capabilities);
+                let subtask_count = decomp.subtasks.len();
+                let agent_names: Vec<_> = decomp.subtasks.iter().map(|s| s.assigned_agent.clone()).collect();
+
+                // Save the generated workflow
+                let workflow_dir = self.home_dir.join(".agents").join("workflows");
+                let _ = std::fs::create_dir_all(&workflow_dir);
+                let workflow_path = workflow_dir.join(format!("{}.lobster", decomp.workflow.name));
+                if let Err(e) = agentry_acp::orchestrator::save_workflow(&decomp.workflow, &workflow_path) {
+                    self.status_message = Some(format!("Workflow save error: {}", e));
+                } else {
+                    self.status_message = Some(format!(
+                        "Workflow: {} subtask(s) → {} (saved to {})",
+                        subtask_count,
+                        agent_names.join(", "),
+                        workflow_path.display()
+                    ));
+                }
+            } else {
+                self.status_message = Some("No agent capabilities found".into());
+            }
+        } else {
+            self.status_message = Some("Workflow: switch to Sync tab (5) to generate workflows".into());
         }
     }
 }
