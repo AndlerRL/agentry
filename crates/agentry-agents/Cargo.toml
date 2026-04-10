@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
+description = "Agent detection, specifications, and registry for 11 agent CLIs"
+repository.workspace = true
 
 [dependencies]
 agentry-core = { workspace = true }

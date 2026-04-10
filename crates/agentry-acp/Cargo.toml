@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
+description = "Agent Communication Protocol: message routing and task orchestration"
+repository.workspace = true
 
 [dependencies]
 agentry-core = { workspace = true }

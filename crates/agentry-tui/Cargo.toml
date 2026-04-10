@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-repository = "https://github.com/AndlerRL/agentry"
+repository.workspace = true
 description = "Multi-Agent Prompt Manager TUI"
 
 [[bin]]

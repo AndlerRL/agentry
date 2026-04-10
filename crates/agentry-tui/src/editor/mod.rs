@@ -366,6 +366,7 @@ impl Editor {
 
     /// Update scroll offset so the cursor remains visible in the viewport.
     /// Uses a 5-line context margin at top/bottom of viewport.
+    #[allow(dead_code)]
     pub fn ensure_cursor_visible(&mut self, viewport_height: usize) {
         let margin = 5.min(viewport_height / 4);
         if self.cursor.row < self.scroll_offset + margin {

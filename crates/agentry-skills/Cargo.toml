@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
+description = "Skill hub, lockfile management, and installer for agent skills"
+repository.workspace = true
 
 [dependencies]
 agentry-core = { workspace = true }
