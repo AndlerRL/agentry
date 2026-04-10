@@ -6,8 +6,7 @@ use crate::discovery::DocType;
 
 /// Read a workspace document's content.
 pub fn read_doc(path: &Path) -> Result<String> {
-    std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read {}", path.display()))
+    std::fs::read_to_string(path).with_context(|| format!("Failed to read {}", path.display()))
 }
 
 /// Write content to a workspace document.
@@ -15,8 +14,7 @@ pub fn write_doc(path: &Path, content: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, content)
-        .with_context(|| format!("Failed to write {}", path.display()))
+    std::fs::write(path, content).with_context(|| format!("Failed to write {}", path.display()))
 }
 
 /// Get the canonical filename for a doc type.

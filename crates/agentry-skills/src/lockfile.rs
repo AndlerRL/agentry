@@ -155,7 +155,9 @@ mod tests {
             installed_at: "2026-03-28T19:39:31.754Z".to_string(),
             updated_at: "2026-03-28T19:47:46.434Z".to_string(),
         };
-        lockfile.skills.insert("deploy-to-vercel".to_string(), entry);
+        lockfile
+            .skills
+            .insert("deploy-to-vercel".to_string(), entry);
 
         write_lockfile(&tmp, &lockfile).unwrap();
         let read_back = read_lockfile(&tmp).unwrap();

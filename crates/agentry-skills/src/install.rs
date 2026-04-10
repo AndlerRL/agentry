@@ -155,7 +155,11 @@ pub fn install_skill(
         "No agent skills dirs found".to_string()
     } else {
         let ok_count = symlink_results.iter().filter(|r| r.success).count();
-        format!("Symlinked to {}/{} agent dirs", ok_count, symlink_results.len())
+        format!(
+            "Symlinked to {}/{} agent dirs",
+            ok_count,
+            symlink_results.len()
+        )
     };
 
     // Cleanup temp dir
@@ -292,12 +296,11 @@ pub fn update_all_skills(
     skill_names
         .iter()
         .map(|name| {
-            update_skill(home_dir, name, agents_with_skills_dir)
-                .unwrap_or_else(|e| SkillOpResult {
-                    skill_name: name.clone(),
-                    success: false,
-                    message: format!("Error: {}", e),
-                })
+            update_skill(home_dir, name, agents_with_skills_dir).unwrap_or_else(|e| SkillOpResult {
+                skill_name: name.clone(),
+                success: false,
+                message: format!("Error: {}", e),
+            })
         })
         .collect()
 }
@@ -342,7 +345,10 @@ pub fn remove_skill(
 
 /// Create relative symlinks for a skill in each agent's skills/ directory.
 /// Follows the pattern: ~/.claude/skills/<name> → ../../.agents/skills/<name>
-fn create_skill_symlinks(skill_name: &str, agents_with_skills_dir: &[PathBuf]) -> Vec<SkillOpResult> {
+fn create_skill_symlinks(
+    skill_name: &str,
+    agents_with_skills_dir: &[PathBuf],
+) -> Vec<SkillOpResult> {
     let mut results = Vec::new();
 
     for agent_skills_dir in agents_with_skills_dir {
@@ -354,11 +360,7 @@ fn create_skill_symlinks(skill_name: &str, agents_with_skills_dir: &[PathBuf]) -
             results.push(SkillOpResult {
                 skill_name: skill_name.to_string(),
                 success: false,
-                message: format!(
-                    "Failed to create {}: {}",
-                    agent_skills_dir.display(),
-                    e
-                ),
+                message: format!("Failed to create {}: {}", agent_skills_dir.display(), e),
             });
             continue;
         }
@@ -467,7 +469,10 @@ mod tests {
 
         assert!(dst.join("SKILL.md").exists());
         assert!(dst.join("subdir/data.txt").exists());
-        assert_eq!(std::fs::read_to_string(dst.join("SKILL.md")).unwrap(), "# Test");
+        assert_eq!(
+            std::fs::read_to_string(dst.join("SKILL.md")).unwrap(),
+            "# Test"
+        );
 
         let _ = std::fs::remove_dir_all(&src);
         let _ = std::fs::remove_dir_all(&dst);

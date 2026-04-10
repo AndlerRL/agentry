@@ -201,8 +201,10 @@ async fn cmd_skills(action: Option<SkillsCommands>) -> Result<()> {
             println!("Skills ({}/{} installed):\n", installed, total);
 
             // Group by source
-            let mut source_groups: std::collections::BTreeMap<String, Vec<&agentry_skills::hub::AvailableSkill>> =
-                std::collections::BTreeMap::new();
+            let mut source_groups: std::collections::BTreeMap<
+                String,
+                Vec<&agentry_skills::hub::AvailableSkill>,
+            > = std::collections::BTreeMap::new();
             for skill in hub.skills.values() {
                 let key = if skill.source.is_empty() {
                     "unknown".to_string()
@@ -255,12 +257,18 @@ async fn cmd_skills(action: Option<SkillsCommands>) -> Result<()> {
                     skill.source.clone()
                 };
                 let result = agentry_skills::install::install_skill(
-                    &home, &source, &skill.skill_path, &skills_dirs,
+                    &home,
+                    &source,
+                    &skill.skill_path,
+                    &skills_dirs,
                 )?;
                 let icon = if result.success { "✓" } else { "✗" };
                 println!("  {} {}", icon, result.message);
             } else {
-                println!("  Skill '{}' not found. Use skills.sh to browse available skills.", name);
+                println!(
+                    "  Skill '{}' not found. Use skills.sh to browse available skills.",
+                    name
+                );
             }
         }
         Some(SkillsCommands::Update) => {
@@ -364,10 +372,7 @@ async fn cmd_openclaw(action: Option<OpenclawCommands>) -> Result<()> {
                 for ws in &workspaces {
                     let default_marker = if ws.is_default { " (default)" } else { "" };
                     let model_info = ws.model.as_deref().unwrap_or("default");
-                    println!(
-                        "  {}{} [{}]",
-                        ws.name, default_marker, model_info
-                    );
+                    println!("  {}{} [{}]", ws.name, default_marker, model_info);
                     println!("    Path: {}", ws.workspace_path.display());
 
                     // Doc status
@@ -378,7 +383,11 @@ async fn cmd_openclaw(action: Option<OpenclawCommands>) -> Result<()> {
 
                     // Lobster workflows
                     if !ws.lobster_workflows.is_empty() {
-                        let wfs: Vec<String> = ws.lobster_workflows.iter().map(|w| w.name.clone()).collect();
+                        let wfs: Vec<String> = ws
+                            .lobster_workflows
+                            .iter()
+                            .map(|w| w.name.clone())
+                            .collect();
                         println!("    Workflows: {}", wfs.join(", "));
                     }
                     println!();

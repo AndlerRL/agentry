@@ -421,7 +421,10 @@ fn draw_skills_list(f: &mut Frame, app: &App, area: Rect) {
         let mut items: Vec<ListItem> = Vec::new();
 
         // Group by source
-        let mut source_groups: std::collections::BTreeMap<String, Vec<&agentry_skills::hub::AvailableSkill>> = std::collections::BTreeMap::new();
+        let mut source_groups: std::collections::BTreeMap<
+            String,
+            Vec<&agentry_skills::hub::AvailableSkill>,
+        > = std::collections::BTreeMap::new();
         for skill in hub.skills.values() {
             let source_key = if skill.source.is_empty() {
                 "unknown".to_string()
@@ -447,14 +450,8 @@ fn draw_skills_list(f: &mut Frame, app: &App, area: Rect) {
                     Color::DarkGray
                 };
                 items.push(ListItem::new(Line::from(vec![
-                    Span::styled(
-                        format!("  {} ", status),
-                        Style::default().fg(status_color),
-                    ),
-                    Span::styled(
-                        skill.name.clone(),
-                        Style::default().fg(Color::White),
-                    ),
+                    Span::styled(format!("  {} ", status), Style::default().fg(status_color)),
+                    Span::styled(skill.name.clone(), Style::default().fg(Color::White)),
                 ])));
             }
         }
@@ -472,11 +469,7 @@ fn draw_skills_list(f: &mut Frame, app: &App, area: Rect) {
         .as_ref()
         .map(|h| h.installed_count())
         .unwrap_or(0);
-    let total = app
-        .skill_hub
-        .as_ref()
-        .map(|h| h.total_count())
-        .unwrap_or(0);
+    let total = app.skill_hub.as_ref().map(|h| h.total_count()).unwrap_or(0);
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -511,7 +504,11 @@ fn draw_skill_detail(f: &mut Frame, app: &App, area: Rect) {
                 Line::from(vec![
                     Span::styled("  Status:   ", Style::default().fg(Color::Yellow)),
                     Span::styled(
-                        if skill.installed { "Installed ✓" } else { "Not installed" },
+                        if skill.installed {
+                            "Installed ✓"
+                        } else {
+                            "Not installed"
+                        },
                         Style::default().fg(if skill.installed {
                             Color::Green
                         } else {
@@ -608,8 +605,10 @@ fn draw_sync_list(f: &mut Frame, app: &App, area: Rect) {
         )))]
     } else {
         // Group by prompt
-        let mut prompt_groups: std::collections::BTreeMap<String, Vec<&crate::app::SyncResultEntry>> =
-            std::collections::BTreeMap::new();
+        let mut prompt_groups: std::collections::BTreeMap<
+            String,
+            Vec<&crate::app::SyncResultEntry>,
+        > = std::collections::BTreeMap::new();
         for entry in &app.sync_results {
             prompt_groups
                 .entry(entry.prompt_name.clone())
@@ -655,7 +654,11 @@ fn draw_sync_list(f: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .title(format!(
             " Sync ({}) ",
-            app.sync_results.iter().filter(|r| r.status == agentry_core::models::SyncStatus::Missing || r.status == agentry_core::models::SyncStatus::Outdated).count()
+            app.sync_results
+                .iter()
+                .filter(|r| r.status == agentry_core::models::SyncStatus::Missing
+                    || r.status == agentry_core::models::SyncStatus::Outdated)
+                .count()
         ))
         .border_style(Style::default().fg(Color::Cyan));
 
@@ -706,7 +709,10 @@ fn draw_sync_detail(f: &mut Frame, app: &App, area: Rect) {
             ]),
             Line::from(vec![
                 Span::styled("  Target:     ", Style::default().fg(Color::Yellow)),
-                Span::styled(entry.destination.clone(), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    entry.destination.clone(),
+                    Style::default().fg(Color::DarkGray),
+                ),
             ]),
             Line::from(""),
             Line::from(Span::styled(
@@ -756,29 +762,46 @@ fn draw_openclaw_list(f: &mut Frame, app: &App, area: Rect) {
             } else {
                 "OpenClaw not installed"
             };
-            vec![ListItem::new(Line::from(Span::styled(
-                format!("  {}", status),
-                Style::default().fg(Color::DarkGray),
-            ))),
-            ListItem::new(Line::from("")),
-            ListItem::new(Line::from(Span::styled(
-                "  c: Create workspace (via openclaw CLI)",
-                Style::default().fg(Color::Yellow),
-            ))),
-            ListItem::new(Line::from(Span::styled(
-                "  a: Add sub-agent",
-                Style::default().fg(Color::Yellow),
-            )))]
+            vec![
+                ListItem::new(Line::from(Span::styled(
+                    format!("  {}", status),
+                    Style::default().fg(Color::DarkGray),
+                ))),
+                ListItem::new(Line::from("")),
+                ListItem::new(Line::from(Span::styled(
+                    "  c: Create workspace (via openclaw CLI)",
+                    Style::default().fg(Color::Yellow),
+                ))),
+                ListItem::new(Line::from(Span::styled(
+                    "  a: Add sub-agent",
+                    Style::default().fg(Color::Yellow),
+                ))),
+            ]
         } else {
             let mut items = Vec::new();
 
             // Header showing install status
             let status_icon = if oc_state.installed { "✓" } else { "✗" };
-            let status_color = if oc_state.installed { Color::Green } else { Color::Red };
+            let status_color = if oc_state.installed {
+                Color::Green
+            } else {
+                Color::Red
+            };
             items.push(ListItem::new(Line::from(vec![
-                Span::styled(format!(" {} OpenClaw ", status_icon), Style::default().fg(status_color)),
                 Span::styled(
-                    format!("({} workspace{})", oc_state.workspaces.len(), if oc_state.workspaces.len() == 1 { "" } else { "s" }),
+                    format!(" {} OpenClaw ", status_icon),
+                    Style::default().fg(status_color),
+                ),
+                Span::styled(
+                    format!(
+                        "({} workspace{})",
+                        oc_state.workspaces.len(),
+                        if oc_state.workspaces.len() == 1 {
+                            ""
+                        } else {
+                            "s"
+                        }
+                    ),
                     Style::default().fg(Color::DarkGray),
                 ),
             ])));
@@ -790,7 +813,11 @@ fn draw_openclaw_list(f: &mut Frame, app: &App, area: Rect) {
                 items.push(ListItem::new(Line::from(vec![
                     Span::styled(
                         format!(" {} ", if ws.is_default { "★" } else { "○" }),
-                        Style::default().fg(if ws.is_default { Color::Yellow } else { Color::DarkGray }),
+                        Style::default().fg(if ws.is_default {
+                            Color::Yellow
+                        } else {
+                            Color::DarkGray
+                        }),
                     ),
                     Span::styled(
                         format!("{}{}", ws.name, default_marker),
@@ -827,7 +854,11 @@ fn draw_openclaw_list(f: &mut Frame, app: &App, area: Rect) {
         )))]
     };
 
-    let ws_count = app.openclaw_state.as_ref().map(|s| s.workspaces.len()).unwrap_or(0);
+    let ws_count = app
+        .openclaw_state
+        .as_ref()
+        .map(|s| s.workspaces.len())
+        .unwrap_or(0);
     let block = Block::default()
         .borders(Borders::ALL)
         .title(format!(" OpenClaw ({}) ", ws_count))

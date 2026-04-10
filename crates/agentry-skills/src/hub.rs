@@ -249,6 +249,9 @@ mod tests {
 
         let custom = vec!["my-org/custom-skills".to_string()];
         let hub = SkillHub::load(&tmp, &custom).unwrap();
-        assert!(hub.sources.iter().any(|s| s.name == "my-org/custom-skills" && s.is_custom));
+        assert!(hub
+            .sources
+            .iter()
+            .any(|s| s.name == "my-org/custom-skills" && s.is_custom));
     }
 }

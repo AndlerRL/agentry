@@ -434,9 +434,19 @@ impl App {
         match self.tab_index {
             0 | 1 => self.detected_agents.len().max(1),
             2 => self.prompts.len() + 1, // +1 for "New Prompt" entry
-            3 => self.skill_hub.as_ref().map(|h| h.skills.len()).unwrap_or(0).max(1),
+            3 => self
+                .skill_hub
+                .as_ref()
+                .map(|h| h.skills.len())
+                .unwrap_or(0)
+                .max(1),
             4 => self.sync_results.len().max(1),
-            5 => self.openclaw_state.as_ref().map(|s| s.workspaces.len()).unwrap_or(0).max(1),
+            5 => self
+                .openclaw_state
+                .as_ref()
+                .map(|s| s.workspaces.len())
+                .unwrap_or(0)
+                .max(1),
             _ => 0,
         }
     }
@@ -517,7 +527,10 @@ impl App {
             }
 
             self.sync_results = results;
-            self.status_message = Some(format!("Sync plan loaded ({} mappings)", self.sync_results.len()));
+            self.status_message = Some(format!(
+                "Sync plan loaded ({} mappings)",
+                self.sync_results.len()
+            ));
             self.list_selected = 0;
         } else {
             self.status_message = Some("Sync: switch to Sync tab (5) to execute".into());
@@ -537,13 +550,10 @@ impl App {
                     let skill = skills[self.list_selected];
                     if !skill.installed {
                         self.skill_confirm = Some(SkillConfirmAction::Install(skill.name.clone()));
-                        self.status_message =
-                            Some(format!("Install '{}'? (y/n)", skill.name));
+                        self.status_message = Some(format!("Install '{}'? (y/n)", skill.name));
                     } else {
-                        self.status_message = Some(format!(
-                            "'{}' is already installed",
-                            skill.name
-                        ));
+                        self.status_message =
+                            Some(format!("'{}' is already installed", skill.name));
                     }
                 }
             }
@@ -561,11 +571,9 @@ impl App {
                     let skill = skills[self.list_selected];
                     if skill.installed {
                         self.skill_confirm = Some(SkillConfirmAction::Update(skill.name.clone()));
-                        self.status_message =
-                            Some(format!("Update '{}'? (y/n)", skill.name));
+                        self.status_message = Some(format!("Update '{}'? (y/n)", skill.name));
                     } else {
-                        self.status_message =
-                            Some(format!("'{}' is not installed", skill.name));
+                        self.status_message = Some(format!("'{}' is not installed", skill.name));
                     }
                 }
             }
@@ -583,11 +591,9 @@ impl App {
                     let skill = skills[self.list_selected];
                     if skill.installed {
                         self.skill_confirm = Some(SkillConfirmAction::Remove(skill.name.clone()));
-                        self.status_message =
-                            Some(format!("Remove '{}'? (y/n)", skill.name));
+                        self.status_message = Some(format!("Remove '{}'? (y/n)", skill.name));
                     } else {
-                        self.status_message =
-                            Some(format!("'{}' is not installed", skill.name));
+                        self.status_message = Some(format!("'{}' is not installed", skill.name));
                     }
                 }
             }
@@ -623,12 +629,14 @@ impl App {
                         let skill_path = skill.skill_path.clone();
                         // If source is empty, we can't install
                         if source.is_empty() {
-                            self.status_message =
-                                Some(format!("No source for '{}'", name));
+                            self.status_message = Some(format!("No source for '{}'", name));
                             return;
                         }
                         let result = agentry_skills::install::install_skill(
-                            &home, &source, &skill_path, &dirs,
+                            &home,
+                            &source,
+                            &skill_path,
+                            &dirs,
                         );
                         match result {
                             Ok(r) => {
@@ -636,8 +644,7 @@ impl App {
                                 self.discover_skills(); // Refresh
                             }
                             Err(e) => {
-                                self.status_message =
-                                    Some(format!("Install error: {}", e));
+                                self.status_message = Some(format!("Install error: {}", e));
                             }
                         }
                     }
@@ -676,11 +683,8 @@ impl App {
                 let dirs = self.agent_skills_dirs.clone();
                 let results = agentry_skills::install::update_all_skills(&home, &dirs);
                 let ok_count = results.iter().filter(|r| r.success).count();
-                self.status_message = Some(format!(
-                    "Updated {}/{} skills",
-                    ok_count,
-                    results.len()
-                ));
+                self.status_message =
+                    Some(format!("Updated {}/{} skills", ok_count, results.len()));
                 self.discover_skills(); // Refresh
             }
         }
@@ -709,7 +713,8 @@ impl App {
                 self.status_message = Some("Run: openclaw setup".into());
                 let _ = std::process::Command::new("openclaw").arg("setup").spawn();
             } else {
-                self.status_message = Some("OpenClaw not installed. Install from https://openclaw.dev".into());
+                self.status_message =
+                    Some("OpenClaw not installed. Install from https://openclaw.dev".into());
             }
         }
     }
@@ -731,19 +736,30 @@ impl App {
             if !self.acp_capabilities.is_empty() {
                 // Use the currently selected sync result as the task context
                 let task = if self.list_selected < self.sync_results.len() {
-                    format!("Sync {} to {}", self.sync_results[self.list_selected].prompt_name, self.sync_results[self.list_selected].agent_id)
+                    format!(
+                        "Sync {} to {}",
+                        self.sync_results[self.list_selected].prompt_name,
+                        self.sync_results[self.list_selected].agent_id
+                    )
                 } else {
                     "Sync all prompts".to_string()
                 };
-                let decomp = agentry_acp::orchestrator::decompose_task(&task, &self.acp_capabilities);
+                let decomp =
+                    agentry_acp::orchestrator::decompose_task(&task, &self.acp_capabilities);
                 let subtask_count = decomp.subtasks.len();
-                let agent_names: Vec<_> = decomp.subtasks.iter().map(|s| s.assigned_agent.clone()).collect();
+                let agent_names: Vec<_> = decomp
+                    .subtasks
+                    .iter()
+                    .map(|s| s.assigned_agent.clone())
+                    .collect();
 
                 // Save the generated workflow
                 let workflow_dir = self.home_dir.join(".agents").join("workflows");
                 let _ = std::fs::create_dir_all(&workflow_dir);
                 let workflow_path = workflow_dir.join(format!("{}.lobster", decomp.workflow.name));
-                if let Err(e) = agentry_acp::orchestrator::save_workflow(&decomp.workflow, &workflow_path) {
+                if let Err(e) =
+                    agentry_acp::orchestrator::save_workflow(&decomp.workflow, &workflow_path)
+                {
                     self.status_message = Some(format!("Workflow save error: {}", e));
                 } else {
                     self.status_message = Some(format!(
@@ -757,7 +773,8 @@ impl App {
                 self.status_message = Some("No agent capabilities found".into());
             }
         } else {
-            self.status_message = Some("Workflow: switch to Sync tab (5) to generate workflows".into());
+            self.status_message =
+                Some("Workflow: switch to Sync tab (5) to generate workflows".into());
         }
     }
 }

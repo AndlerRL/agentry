@@ -143,10 +143,7 @@ pub fn discover_workspaces(home_dir: &Path) -> Result<Vec<OpenClawWorkspace>> {
 
         // Expand ~ to home dir
         let workspace_path = expand_tilde(workspace_path, home_dir);
-        let workspace_name = entry
-            .name
-            .as_deref()
-            .unwrap_or(&entry.id);
+        let workspace_name = entry.name.as_deref().unwrap_or(&entry.id);
 
         let mut ws = OpenClawWorkspace {
             id: entry.id.clone(),

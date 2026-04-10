@@ -49,10 +49,7 @@ pub struct Subtask {
 }
 
 /// Decompose a high-level task into subtasks and generate a .lobster workflow.
-pub fn decompose_task(
-    task: &str,
-    capabilities: &[AgentCapability],
-) -> TaskDecomposition {
+pub fn decompose_task(task: &str, capabilities: &[AgentCapability]) -> TaskDecomposition {
     // Determine task categories from the description
     let task_lower = task.to_lowercase();
     let mut subtasks = Vec::new();
@@ -82,7 +79,10 @@ pub fn decompose_task(
 
         steps.push(WorkflowStep {
             id: "analyze".to_string(),
-            run: Some(format!("agentry task assign --type analysis --prompt \"{}\"", task)),
+            run: Some(format!(
+                "agentry task assign --type analysis --prompt \"{}\"",
+                task
+            )),
             pipeline: None,
             stdin: None,
             approval: None,
@@ -92,14 +92,16 @@ pub fn decompose_task(
 
         steps.push(WorkflowStep {
             id: "review".to_string(),
-            run: Some(format!("agentry task assign --type review --prompt \"{}\"", task)),
+            run: Some(format!(
+                "agentry task assign --type review --prompt \"{}\"",
+                task
+            )),
             pipeline: None,
             stdin: Some("$analyze.stdout".to_string()),
             approval: Some("Review findings before proceeding?".to_string()),
             when: None,
             env: None,
         });
-
     } else if task_lower.contains("deploy") || task_lower.contains("release") {
         // Deploy workflow: build → test → approve → deploy
         let deployer = route_prompt(capabilities, "terminal", task)
@@ -169,8 +171,10 @@ pub fn decompose_task(
             when: Some("$approve.approved".to_string()),
             env: None,
         });
-
-    } else if task_lower.contains("implement") || task_lower.contains("build") || task_lower.contains("create") {
+    } else if task_lower.contains("implement")
+        || task_lower.contains("build")
+        || task_lower.contains("create")
+    {
         // Implementation workflow: plan → implement → test
         let coder = route_prompt(capabilities, "code_generation", task)
             .map(|c| c.agent_id.clone())
@@ -202,7 +206,10 @@ pub fn decompose_task(
 
         steps.push(WorkflowStep {
             id: "plan".to_string(),
-            run: Some(format!("agentry task assign --type planning --prompt \"{}\"", task)),
+            run: Some(format!(
+                "agentry task assign --type planning --prompt \"{}\"",
+                task
+            )),
             pipeline: None,
             stdin: None,
             approval: None,
@@ -212,7 +219,10 @@ pub fn decompose_task(
 
         steps.push(WorkflowStep {
             id: "implement".to_string(),
-            run: Some(format!("agentry task assign --type code_generation --prompt \"{}\"", task)),
+            run: Some(format!(
+                "agentry task assign --type code_generation --prompt \"{}\"",
+                task
+            )),
             pipeline: None,
             stdin: Some("$plan.stdout".to_string()),
             approval: None,
@@ -229,7 +239,6 @@ pub fn decompose_task(
             when: None,
             env: None,
         });
-
     } else {
         // Generic single-step workflow
         let agent = route_prompt(capabilities, "general", task)
@@ -255,7 +264,14 @@ pub fn decompose_task(
         });
     }
 
-    let workflow_name = format!("agentry-{}", task_lower.split_whitespace().take(3).collect::<Vec<_>>().join("-"));
+    let workflow_name = format!(
+        "agentry-{}",
+        task_lower
+            .split_whitespace()
+            .take(3)
+            .collect::<Vec<_>>()
+            .join("-")
+    );
 
     TaskDecomposition {
         subtasks,
@@ -271,8 +287,8 @@ pub fn decompose_task(
 
 /// Save a workflow to a .lobster file.
 pub fn save_workflow(workflow: &LobsterWorkflow, path: &std::path::Path) -> Result<()> {
-    let content = serde_yaml::to_string(workflow)
-        .with_context(|| "Failed to serialize workflow to YAML")?;
+    let content =
+        serde_yaml::to_string(workflow).with_context(|| "Failed to serialize workflow to YAML")?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -323,10 +339,7 @@ mod tests {
             AgentCapability {
                 agent_id: "warp".to_string(),
                 agent_name: "Warp".to_string(),
-                capabilities: vec![
-                    "terminal".to_string(),
-                    "devops".to_string(),
-                ],
+                capabilities: vec!["terminal".to_string(), "devops".to_string()],
                 skills: vec![],
                 model: None,
             },

@@ -59,10 +59,7 @@ pub fn build_capability_matrix(home_dir: &Path) -> Result<Vec<AgentCapability>> 
                 ]);
             }
             "opencode" => {
-                caps.extend_from_slice(&[
-                    "code_editing".to_string(),
-                    "terminal".to_string(),
-                ]);
+                caps.extend_from_slice(&["code_editing".to_string(), "terminal".to_string()]);
             }
             "amp" => {
                 caps.extend_from_slice(&[
@@ -84,10 +81,7 @@ pub fn build_capability_matrix(home_dir: &Path) -> Result<Vec<AgentCapability>> 
                 ]);
             }
             "antigravity" => {
-                caps.extend_from_slice(&[
-                    "code_generation".to_string(),
-                    "autonomous".to_string(),
-                ]);
+                caps.extend_from_slice(&["code_generation".to_string(), "autonomous".to_string()]);
             }
             "warp" => {
                 caps.extend_from_slice(&[
@@ -217,20 +211,14 @@ mod tests {
             AgentCapability {
                 agent_id: "claude-code".to_string(),
                 agent_name: "Claude Code".to_string(),
-                capabilities: vec![
-                    "code_generation".to_string(),
-                    "code_review".to_string(),
-                ],
+                capabilities: vec!["code_generation".to_string(), "code_review".to_string()],
                 skills: vec![],
                 model: Some("2.1.50".to_string()),
             },
             AgentCapability {
                 agent_id: "gemini-cli".to_string(),
                 agent_name: "Gemini CLI".to_string(),
-                capabilities: vec![
-                    "research".to_string(),
-                    "multi_modal".to_string(),
-                ],
+                capabilities: vec!["research".to_string(), "multi_modal".to_string()],
                 skills: vec![],
                 model: None,
             },
