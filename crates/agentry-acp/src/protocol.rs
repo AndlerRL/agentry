@@ -325,9 +325,13 @@ use sha1::Digest;
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_ID: AtomicU64 = AtomicU64::new(0);
 
     fn home_dir() -> PathBuf {
-        std::env::temp_dir().join("agentry_test_acp")
+        let id = TEST_ID.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("agentry_test_acp_{}", id))
     }
 
     #[test]
