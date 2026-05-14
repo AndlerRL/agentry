@@ -9,12 +9,25 @@ use ratatui::{
 use crate::app::App;
 
 const ASCII_ART: &[&str] = &[
-    "          █████╗ ███████╗███████╗██████╗         ",
-    "         ██╔══██╗██╔════╝██╔════╝██╔══██╗        ",
-    "         ███████║███████╗███████╗██████╔╝        ",
-    "         ██╔══██║╚════██║╚════██║██╔═══╗         ",
-    "         ██║  ██║███████║███████║██║  ██╗        ",
-    "         ╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝      ",
+    "████████████████████████████████████████████████████████",
+    "█▌                                                        ▐█",
+    "█▌                                                        ▐█",
+    "█▌                                                      I8▐█",
+    "█▌                                                      I8▐█",
+    "█▌                                                    88888888▐█",
+    "█▌                                                      I8▐█",
+    "█▌       ,gggg,gg    ,gggg,gg   ,ggg,    ,ggg,,ggg,    I8    ,gggggg,  ▐█",
+    "█▌      dP\"  \"Y8I   dP\"  \"Y8I  i8\" \"8i  ,8\" \"8P\" \"8,   I8    dP\"\"\"\"8I  ▐█",
+    "█▌     i8'    ,8I  i8'    ,8I  I8, ,8I  I8   8I   8I  ,I8,  ,8'    8I  ▐█",
+    "█▌    ,d8,   ,d8b,,d8,   ,d8I  'YbadP' ,dP   8I   Yb,,d88b,,dP     Y8,▐█",
+    "█▌    P\"Y8888P\"\"Y8P\"Y8888P\"888888P\"Y8888P'   8I   'Y88P\"\"Y88P      'Y8▐█",
+    "█▌                       ,d8I'                                      ,d8I'▐█",
+    "█▌                     ,dP'8I                                     ,dP'8I▐█",
+    "█▌                    ,8\"  8I                                    ,8\"  8I▐█",
+    "█▌                    I8   8I                                    I8   8I▐█",
+    "█▌                    '8, ,8I                                    '8, ,8I▐█",
+    "█▌                     'Y8P\"                                      'Y8P\"  ▐█",
+    "████████████████████████████████████████████████████████████████████████████████",
 ];
 
 pub fn draw_intro(f: &mut Frame, app: &App) {
@@ -32,7 +45,7 @@ pub fn draw_intro(f: &mut Frame, app: &App) {
     let mut lines: Vec<Line> = Vec::new();
 
     // Top spacing
-    let top_pad = inner.height.saturating_sub(20) / 2;
+    let top_pad = inner.height.saturating_sub(28) / 2;
     for _ in 0..top_pad {
         lines.push(Line::from(""));
     }
@@ -86,6 +99,12 @@ pub fn draw_intro(f: &mut Frame, app: &App) {
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         "        v0.1.0  │  Press any key to continue",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    // Help hint
+    lines.push(Line::from(Span::styled(
+        "        j/k: navigate  Tab: switch  ?: help",
         Style::default().fg(Color::DarkGray),
     )));
 
