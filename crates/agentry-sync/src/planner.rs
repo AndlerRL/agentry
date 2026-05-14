@@ -184,6 +184,7 @@ mod tests {
                 prompt_format: PromptFormat::PlainMd,
                 skills_dir_name: None,
                 max_size: None,
+                install_methods: vec![],
             },
             installed,
             version: None,
@@ -192,6 +193,7 @@ mod tests {
             skills_dir: None,
             skills_symlink_pattern: None,
             installed_skills: vec![],
+            detected_methods: vec![],
         }
     }
 

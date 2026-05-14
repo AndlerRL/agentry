@@ -4,7 +4,6 @@ use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent};
 use ratatui::{backend::Backend, Frame, Terminal};
 
-use crate::editor::Editor;
 use crate::ui;
 
 /// A single sync result for display in the Sync tab.
@@ -45,8 +44,6 @@ pub struct App {
     pub openclaw_state: Option<OpenClawState>,
     /// ACP capability matrix
     pub acp_capabilities: Vec<agentry_acp::protocol::AgentCapability>,
-    /// Editor state (when editing a prompt)
-    pub editor: Option<Editor>,
     /// New prompt name (when creating a new prompt)
     pub new_prompt_name: Option<String>,
     /// Delete confirmation pending
@@ -69,13 +66,25 @@ pub struct App {
     pub skill_confirm: Option<SkillConfirmAction>,
     /// Error message to display in the status bar (cleared on next key press)
     pub error_message: Option<String>,
+    /// Set to true after external editor exits — main loop calls terminal.clear()
+    pub needs_terminal_clear: bool,
+    /// For Agents tab: which install method is highlighted in the detail panel.
+    pub method_selected: usize,
+    /// Agent install/update/remove confirmation pending.
+    pub agent_confirm: Option<AgentConfirmAction>,
+    /// When Some, user is typing a version string for install.
+    #[allow(dead_code)]
+    pub version_input: Option<String>,
+    /// Cached version list for the selected install method.
+    pub version_list: Option<Vec<String>>,
+    /// Error fetching versions.
+    pub version_list_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppMode {
     Intro,
     Dashboard,
-    Editor,
     Quit,
 }
 
@@ -86,6 +95,33 @@ pub enum SkillConfirmAction {
     Remove(String),
     Update(String),
     UpdateAll,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentConfirmAction {
+    Install {
+        agent_id: String,
+        method: agentry_core::models::InstallMethod,
+        version: Option<String>,
+    },
+    Update {
+        agent_id: String,
+        method: agentry_core::models::InstallMethod,
+    },
+    Remove {
+        agent_id: String,
+        method: agentry_core::models::InstallMethod,
+    },
+}
+
+impl AgentConfirmAction {
+    pub fn agent_id(&self) -> &str {
+        match self {
+            AgentConfirmAction::Install { agent_id, .. }
+            | AgentConfirmAction::Update { agent_id, .. }
+            | AgentConfirmAction::Remove { agent_id, .. } => agent_id,
+        }
+    }
 }
 
 const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -112,7 +148,6 @@ impl App {
             sync_results: Vec::new(),
             openclaw_state: None,
             acp_capabilities: Vec::new(),
-            editor: None,
             new_prompt_name: None,
             delete_confirm: None,
             home_dir,
@@ -124,6 +159,12 @@ impl App {
             show_help: false,
             skill_confirm: None,
             error_message: None,
+            needs_terminal_clear: false,
+            method_selected: 0,
+            agent_confirm: None,
+            version_input: None,
+            version_list: None,
+            version_list_error: None,
         }
     }
 
@@ -152,6 +193,11 @@ impl App {
 
         // Main event loop
         while !self.should_quit {
+            if self.needs_terminal_clear {
+                terminal.clear()?;
+                self.needs_terminal_clear = false;
+            }
+
             terminal.draw(|f| self.draw(f))?;
 
             // Poll for events with timeout
@@ -222,27 +268,55 @@ impl App {
         &mut self,
         terminal: &mut Terminal<B>,
     ) -> Result<()> {
-        // Animate intro while detecting agents in background
-        let agents = agentry_agents::detect_all_agents().await;
-        self.detected_agents = agents;
+        use tokio::sync::mpsc;
 
-        // Animate progress
-        let steps = 20;
-        for i in 0..=steps {
-            self.intro_progress = i as f32 / steps as f32;
+        // Spawn agent detection in background so we can animate immediately
+        let (tx, mut rx) = mpsc::channel::<Vec<agentry_core::models::DetectedAgent>>(1);
+        tokio::spawn(async move {
+            let agents = agentry_agents::detect_all_agents().await;
+            let _ = tx.send(agents).await;
+        });
+
+        // Animate progress while detection runs or until user skips
+        let mut detection_done = false;
+        loop {
+            // Check if detection finished
+            if !detection_done {
+                if let Ok(agents) = rx.try_recv() {
+                    self.detected_agents = agents;
+                    self.intro_progress = 1.0;
+                    detection_done = true;
+                } else {
+                    // Animate progress upward but never reach 1.0 until done
+                    let target = 0.85;
+                    self.intro_progress += (target - self.intro_progress) * 0.15;
+                    self.intro_progress = self.intro_progress.min(target);
+                }
+            }
+
+            self.spinner_frame = (self.spinner_frame + 1) % SPINNER_FRAMES.len();
             terminal.draw(|f| ui::draw_intro(f, self))?;
 
             // Check if user pressed a key to skip
-            if crossterm::event::poll(std::time::Duration::from_millis(40))? {
+            if crossterm::event::poll(std::time::Duration::from_millis(60))? {
                 if let Event::Key(_) = event::read()? {
+                    if !detection_done {
+                        // Still waiting — drain the channel when it arrives
+                        if let Some(agents) = rx.recv().await {
+                            self.detected_agents = agents;
+                        }
+                    }
                     break;
                 }
             }
-        }
 
-        self.intro_progress = 1.0;
-        self.intro_ready = true;
-        terminal.draw(|f| ui::draw_intro(f, self))?;
+            if detection_done {
+                // Show the finished screen briefly, then wait for key press
+                self.intro_ready = true;
+                terminal.draw(|f| ui::draw_intro(f, self))?;
+                break;
+            }
+        }
 
         // Wait for key press to continue
         loop {
@@ -263,40 +337,6 @@ impl App {
         // Clear any previous error message on next key press
         if self.error_message.is_some() {
             self.error_message = None;
-        }
-
-        // If in editor mode, forward keys to editor
-        if self.mode == AppMode::Editor {
-            if let Some(ref mut editor) = self.editor {
-                if key.code == KeyCode::Esc && editor.mode == crate::editor::EditorMode::Normal {
-                    self.mode = AppMode::Dashboard;
-                    self.editor = None;
-                    return Ok(());
-                }
-                editor.handle_key(key);
-                // Check for :wq command (save and quit)
-                if let Some(ref msg) = editor.message {
-                    if msg == "Saved." {
-                        // Save the prompt content
-                        if let Some(path) = editor.filename.clone() {
-                            let content = editor.buffer.content();
-                            // Write to the prompt's source path or canonical store
-                            let save_path =
-                                self.home_dir.join(".agents").join("prompts").join(&path);
-                            if let Some(parent) = save_path.parent() {
-                                if let Err(e) = std::fs::create_dir_all(parent) {
-                                    self.error_message = Some(format!("Failed to save: {}", e));
-                                }
-                            }
-                            if let Err(e) = std::fs::write(&save_path, &content) {
-                                self.error_message = Some(format!("Failed to save: {}", e));
-                            }
-                        }
-                        editor.message = None;
-                    }
-                }
-            }
-            return Ok(());
         }
 
         if self.show_help {
@@ -333,6 +373,24 @@ impl App {
             return Ok(());
         }
 
+        // Handle agent confirm action
+        if self.agent_confirm.is_some() {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    let action = self.agent_confirm.take();
+                    if let Some(action) = action {
+                        self.execute_agent_action(action);
+                    }
+                }
+                KeyCode::Char('n') | KeyCode::Esc => {
+                    self.agent_confirm = None;
+                    self.status_message = Some("Cancelled".into());
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
         // Handle skill confirm action
         if self.skill_confirm.is_some() {
             match key.code {
@@ -356,13 +414,42 @@ impl App {
                 KeyCode::Enter => {
                     if let Some(name) = self.new_prompt_name.take() {
                         if !name.is_empty() {
-                            // Create a new prompt and open editor
-                            let mut editor = Editor::with_content("");
-                            editor.filename = Some(format!("{}.md", name));
-                            editor.modified = false;
-                            editor.message = Some("New prompt - press i to insert".into());
-                            self.mode = AppMode::Editor;
-                            self.editor = Some(editor);
+                            // Create a new empty global prompt
+                            let prompt_path = self
+                                .home_dir
+                                .join(".agents")
+                                .join("prompts")
+                                .join(format!("{}.md", name));
+                            if let Some(parent) = prompt_path.parent() {
+                                let _ = std::fs::create_dir_all(parent);
+                            }
+                            // Write an empty template
+                            let template = format!(
+                                "# {}\n\n<!-- Write your prompt content here -->\n",
+                                name
+                            );
+                            if let Err(e) = std::fs::write(&prompt_path, &template) {
+                                self.error_message =
+                                    Some(format!("Failed to create prompt: {}", e));
+                            } else {
+                                self.status_message =
+                                    Some(format!("Created prompt: {}", name));
+                                // Reload prompts
+                                self.discover_prompts();
+                                // Open it in external editor
+                                self.edit_file_externally(&prompt_path);
+                                // Reload the content
+                                if let Ok(content) = std::fs::read_to_string(&prompt_path) {
+                                    // Find the new prompt and update it
+                                    if let Some(p) = self
+                                        .prompts
+                                        .iter_mut()
+                                        .find(|p| p.name == name)
+                                    {
+                                        p.body = content;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -398,7 +485,6 @@ impl App {
             KeyCode::Char('3') => self.tab_index = 2,
             KeyCode::Char('4') => self.tab_index = 3,
             KeyCode::Char('5') => self.tab_index = 4,
-            KeyCode::Char('6') => self.tab_index = 5,
             // Navigation
             KeyCode::Char('j') | KeyCode::Down => self.list_next(),
             KeyCode::Char('k') | KeyCode::Up => self.list_prev(),
@@ -414,6 +500,9 @@ impl App {
             KeyCode::Char('g') => self.on_github(),
             KeyCode::Char('c') => self.on_create_workspace(),
             KeyCode::Char('a') => self.on_add_agent(),
+            KeyCode::Left => self.method_prev(),
+            KeyCode::Right => self.method_next(),
+            KeyCode::Char('v') => self.on_list_versions(),
             KeyCode::Char('w') => self.on_workflow(),
             _ => {}
         }
@@ -421,17 +510,19 @@ impl App {
     }
 
     fn next_tab(&mut self) {
-        self.tab_index = (self.tab_index + 1) % 6;
+        self.tab_index = (self.tab_index + 1) % 5;
         self.list_selected = 0;
+        self.method_selected = 0;
     }
 
     fn prev_tab(&mut self) {
         self.tab_index = if self.tab_index == 0 {
-            5
+            4
         } else {
             self.tab_index - 1
         };
         self.list_selected = 0;
+        self.method_selected = 0;
     }
 
     fn list_next(&mut self) {
@@ -447,64 +538,474 @@ impl App {
         }
     }
 
+    /// Total number of items in the current tab's list (including headers/actions).
     fn list_max(&self) -> usize {
         match self.tab_index {
-            0 | 1 => self.detected_agents.len().max(1),
-            2 => self.prompts.len() + 1, // +1 for "New Prompt" entry
-            3 => self
-                .skill_hub
-                .as_ref()
-                .map(|h| h.skills.len())
-                .unwrap_or(0)
-                .max(1),
-            4 => self.sync_results.len().max(1),
-            5 => self
-                .openclaw_state
-                .as_ref()
-                .map(|s| s.workspaces.len())
-                .unwrap_or(0)
-                .max(1),
+            0 => self.detected_agents.len().max(1), // Agents tab
+            1 => { // Prompts tab
+                // Prompts: global header + global prompts + project header + project prompts + new action
+                let has_global = self
+                    .prompts
+                    .iter()
+                    .any(|p| matches!(p.scope, agentry_core::models::PromptScope::Global));
+                let has_project = self
+                    .prompts
+                    .iter()
+                    .any(|p| matches!(p.scope, agentry_core::models::PromptScope::Project { .. }));
+                let mut count = 0;
+                if has_global {
+                    count += 1; // header
+                    count += self
+                        .prompts
+                        .iter()
+                        .filter(|p| matches!(p.scope, agentry_core::models::PromptScope::Global))
+                        .count();
+                }
+                if has_project {
+                    count += 1; // header
+                    count += self
+                        .prompts
+                        .iter()
+                        .filter(|p| {
+                            matches!(p.scope, agentry_core::models::PromptScope::Project { .. })
+                        })
+                        .count();
+                }
+                count += 1; // "New Global Prompt" action
+                count.max(1)
+            }
+            2 => {
+                // Skills grouped by source: each source has a header + its skills
+                if let Some(ref hub) = self.skill_hub {
+                    let mut source_groups: std::collections::BTreeMap<
+                        &str,
+                        Vec<&agentry_skills::hub::AvailableSkill>,
+                    > = std::collections::BTreeMap::new();
+                    for skill in hub.skills.values() {
+                        let key = if skill.source.is_empty() {
+                            "unknown"
+                        } else {
+                            skill.source.as_str()
+                        };
+                        source_groups.entry(key).or_default().push(skill);
+                    }
+                    let mut count = 0;
+                    for skills in source_groups.values() {
+                        count += 1; // source header
+                        count += skills.len(); // skills under this source
+                    }
+                    count.max(1)
+                } else {
+                    1
+                }
+            }
+            3 => {
+                // Sync: grouped by prompt name — each group has header + entries
+                if self.sync_results.is_empty() {
+                    1 // placeholder
+                } else {
+                    let mut groups: std::collections::BTreeMap<&str, Vec<&crate::app::SyncResultEntry>> =
+                        std::collections::BTreeMap::new();
+                    for entry in &self.sync_results {
+                        groups.entry(&entry.prompt_name).or_default().push(entry);
+                    }
+                    let mut count = 0;
+                    for entries in groups.values() {
+                        count += 1; // prompt name header
+                        count += entries.len(); // mappings
+                    }
+                    count.max(1)
+                }
+            }
+            4 => {
+                // OpenClaw: status header + spacer + workspaces (each on one line with doc badges)
+                if let Some(ref oc_state) = self.openclaw_state {
+                    if oc_state.workspaces.is_empty() {
+                        5 // status message + spacer + 2 hints + empty
+                    } else {
+                        1 + 1 + oc_state.workspaces.len() // status header + spacer + workspaces
+                    }
+                } else {
+                    1
+                }
+            }
             _ => 0,
         }
     }
 
-    fn on_enter(&mut self) {
-        if self.tab_index == 2 {
-            // Prompts tab - open selected prompt for editing
-            if self.list_selected < self.prompts.len() {
-                let prompt = &self.prompts[self.list_selected];
-                let content = if let Some(ref path) = prompt.source_path {
-                    std::fs::read_to_string(path).unwrap_or_else(|_| prompt.body.clone())
-                } else {
-                    prompt.body.clone()
-                };
-                let mut editor = Editor::with_content(&content);
-                editor.filename = Some(prompt.canonical_filename());
-                self.mode = AppMode::Editor;
-                self.editor = Some(editor);
+    /// Resolve the selected prompt index (Prompts tab). Returns None if a header or action is selected.
+    fn selected_prompt_index(&self) -> Option<usize> {
+        if self.tab_index != 1 {
+            return None;
+        }
+        let global_prompts: Vec<(usize, &agentry_core::models::UnifiedPrompt)> = self
+            .prompts
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| matches!(p.scope, agentry_core::models::PromptScope::Global))
+            .collect();
+        let project_prompts: Vec<(usize, &agentry_core::models::UnifiedPrompt)> = self
+            .prompts
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| matches!(p.scope, agentry_core::models::PromptScope::Project { .. }))
+            .collect();
+
+        let mut list_row = 0;
+
+        // Global header
+        if !global_prompts.is_empty() {
+            if self.list_selected == list_row {
+                return None;
             }
+            list_row += 1;
+            // Global prompts
+            for (orig_idx, _) in &global_prompts {
+                if self.list_selected == list_row {
+                    return Some(*orig_idx);
+                }
+                list_row += 1;
+            }
+        }
+
+        // Project header
+        if !project_prompts.is_empty() {
+            if self.list_selected == list_row {
+                return None;
+            }
+            list_row += 1;
+            // Project prompts
+            for (orig_idx, _) in &project_prompts {
+                if self.list_selected == list_row {
+                    return Some(*orig_idx);
+                }
+                list_row += 1;
+            }
+        }
+
+        // "New Global Prompt" action
+        None
+    }
+
+    /// True if list_selected points to the "New Global Prompt" action row.
+    pub fn list_is_new_prompt_action(&self) -> bool {
+        if self.tab_index != 1 {
+            return false;
+        }
+        let total = self.list_max();
+        self.list_selected == total.saturating_sub(1) && total > 0
+    }
+
+    /// Resolve the selected skill (Skills tab). Returns None if a header is selected.
+    fn selected_skill(&self) -> Option<&agentry_skills::hub::AvailableSkill> {
+        if self.tab_index != 2 {
+            return None;
+        }
+        let hub = self.skill_hub.as_ref()?;
+
+        // Build the same grouped structure as draw_skills_list
+        let mut source_groups: std::collections::BTreeMap<
+            &str,
+            Vec<&agentry_skills::hub::AvailableSkill>,
+        > = std::collections::BTreeMap::new();
+        for skill in hub.skills.values() {
+            let key = if skill.source.is_empty() {
+                "unknown"
+            } else {
+                skill.source.as_str()
+            };
+            source_groups.entry(key).or_default().push(skill);
+        }
+
+        let mut list_row = 0;
+        for skills in source_groups.values() {
+            // Source header
+            if self.list_selected == list_row {
+                return None;
+            }
+            list_row += 1;
+            // Skills in this group
+            for skill in skills {
+                if self.list_selected == list_row {
+                    return Some(skill);
+                }
+                list_row += 1;
+            }
+        }
+        None
+    }
+
+    /// Collect flat list of skills with their original indices (same order as draw_skills_list).
+    fn selected_skill_index(&self) -> Option<usize> {
+        if self.tab_index != 2 {
+            return None;
+        }
+        let hub = self.skill_hub.as_ref()?;
+        let skills: Vec<_> = hub.skills.values().collect();
+
+        let mut source_groups: std::collections::BTreeMap<
+            &str,
+            Vec<(usize, &agentry_skills::hub::AvailableSkill)>,
+        > = std::collections::BTreeMap::new();
+        for (i, skill) in skills.iter().enumerate() {
+            let key = if skill.source.is_empty() {
+                "unknown"
+            } else {
+                skill.source.as_str()
+            };
+            source_groups.entry(key).or_default().push((i, skill));
+        }
+
+        let mut list_row = 0;
+        for group_skills in source_groups.values() {
+            if self.list_selected == list_row {
+                return None; // header
+            }
+            list_row += 1;
+            for (orig_idx, _) in group_skills {
+                if self.list_selected == list_row {
+                    return Some(*orig_idx);
+                }
+                list_row += 1;
+            }
+        }
+        None
+    }
+
+    /// Resolve the selected sync entry (Sync tab). Returns None if a header is selected.
+    fn selected_sync_entry(&self) -> Option<&crate::app::SyncResultEntry> {
+        if self.tab_index != 3 || self.sync_results.is_empty() {
+            return None;
+        }
+        let mut prompt_groups: std::collections::BTreeMap<
+            &str,
+            Vec<(usize, &crate::app::SyncResultEntry)>,
+        > = std::collections::BTreeMap::new();
+        for (i, entry) in self.sync_results.iter().enumerate() {
+            prompt_groups
+                .entry(&entry.prompt_name)
+                .or_default()
+                .push((i, entry));
+        }
+
+        let mut list_row = 0;
+        for entries in prompt_groups.values() {
+            if self.list_selected == list_row {
+                return None; // header
+            }
+            list_row += 1;
+            for (_orig_idx, entry) in entries {
+                if self.list_selected == list_row {
+                    return Some(entry);
+                }
+                list_row += 1;
+            }
+        }
+        None
+    }
+
+    /// Resolve the selected workspace index (OpenClaw tab).
+    fn selected_workspace_index(&self) -> Option<usize> {
+        if self.tab_index != 4 {
+            return None;
+        }
+        let oc_state = self.openclaw_state.as_ref()?;
+        if oc_state.workspaces.is_empty() {
+            return None;
+        }
+        // Layout: status header (row 0) + spacer (row 1) + workspace entries (row 2+)
+        let ws_row = self.list_selected.saturating_sub(2);
+        if ws_row < oc_state.workspaces.len() {
+            Some(ws_row)
+        } else {
+            None
+        }
+    }
+
+    /// Shell out to $EDITOR (or nvim/vim/vi) to edit a prompt by its index.
+    fn edit_with_external_editor(&mut self, prompt_idx: usize) {
+        if prompt_idx >= self.prompts.len() {
+            return;
+        }
+
+        let prompt = &self.prompts[prompt_idx];
+        let file_path = if let Some(ref path) = prompt.source_path {
+            path.clone()
+        } else {
+            let store_path = self
+                .home_dir
+                .join(".agents")
+                .join("prompts")
+                .join(prompt.canonical_filename());
+            if let Some(parent) = store_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if !store_path.exists() {
+                let _ = std::fs::write(&store_path, &prompt.body);
+            }
+            store_path
+        };
+
+        self.edit_file_externally(&file_path);
+
+        // Reload the prompt content from disk
+        if let Ok(content) = std::fs::read_to_string(&file_path) {
+            self.prompts[prompt_idx].body = content;
+            self.status_message = Some(format!("Edited: {}", self.prompts[prompt_idx].name));
+        }
+    }
+
+    /// Shell out to $EDITOR for an arbitrary file path.
+    fn edit_file_externally(&mut self, file_path: &std::path::Path) {
+        let editor = std::env::var("EDITOR").ok().unwrap_or_else(|| {
+            for cmd in &["nvim", "vim", "vi"] {
+                if std::process::Command::new("which")
+                    .arg(cmd)
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false)
+                {
+                    return cmd.to_string();
+                }
+            }
+            "vi".to_string()
+        });
+
+        // Suspend TUI
+        use crossterm::{
+            execute,
+            terminal::{disable_raw_mode, LeaveAlternateScreen},
+        };
+        let _ = disable_raw_mode();
+        let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
+
+        // Run the editor
+        let result = std::process::Command::new(&editor)
+            .arg(file_path)
+            .status();
+
+        // Restore TUI
+        use crossterm::{
+            terminal::{enable_raw_mode, EnterAlternateScreen},
+        };
+        let _ = execute!(std::io::stdout(), EnterAlternateScreen);
+        let _ = enable_raw_mode();
+
+        // Signal main loop to clear terminal before next draw
+        self.needs_terminal_clear = true;
+
+        match result {
+            Ok(status) if !status.success() => {
+                self.status_message = Some("Editor exited with error".into());
+            }
+            Err(e) => {
+                self.error_message = Some(format!("Failed to launch {}: {}", editor, e));
+            }
+            _ => {}
+        }
+    }
+
+    fn on_enter(&mut self) {
+        match self.tab_index {
+            0 => {
+                // Agents tab - install via selected method
+                if let Some(agent) = self.detected_agents.get(self.list_selected) {
+                    if let Some(method) = agent.spec.install_methods.get(self.method_selected) {
+                        if method.available_on_os() {
+                            let is_detected = agent.detected_methods.contains(method);
+                            if !is_detected {
+                                self.agent_confirm = Some(AgentConfirmAction::Install {
+                                    agent_id: agent.spec.id.clone(),
+                                    method: method.clone(),
+                                    version: None,
+                                });
+                                self.status_message = Some(format!(
+                                    "Install {} via {}? (y/n)",
+                                    agent.spec.name,
+                                    method.label()
+                                ));
+                            } else {
+                                self.status_message = Some(format!(
+                                    "{} already installed via {}",
+                                    agent.spec.name,
+                                    method.label()
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            1 => {
+                // Prompts tab - edit selected prompt via $EDITOR
+                if let Some(idx) = self.selected_prompt_index() {
+                    self.edit_with_external_editor(idx);
+                } else if self.list_is_new_prompt_action() {
+                    // "New Global Prompt" action row
+                    self.new_prompt_name = Some(String::new());
+                    self.status_message = Some("Enter prompt name, then press Enter".into());
+                }
+            }
+            2 => {
+                // Skills tab - install selected skill (clone data to avoid borrow conflicts)
+                let skill_info = self.selected_skill().map(|s| {
+                    (s.name.clone(), s.installed, s.source.clone())
+                });
+                if let Some((name, installed, source)) = skill_info {
+                    if !installed && !source.is_empty() {
+                        self.skill_confirm =
+                            Some(SkillConfirmAction::Install(name.clone()));
+                        self.status_message =
+                            Some(format!("Install '{}'? (y/n)", name));
+                    } else if installed {
+                        self.status_message =
+                            Some(format!("'{}' is already installed", name));
+                    }
+                }
+            }
+            4 => {
+                // OpenClaw tab - edit selected workspace doc
+                let doc_path: Option<std::path::PathBuf> = {
+                    let oc_state = self.openclaw_state.as_ref();
+                    let ws_idx = self.selected_workspace_index();
+                    oc_state
+                        .and_then(|s| ws_idx.and_then(|i| s.workspaces.get(i)))
+                        .and_then(|ws| ws.docs.first().map(|d| d.path.clone()))
+                };
+                let has_ws = self.selected_workspace_index().is_some();
+                if let Some(path) = doc_path {
+                    self.edit_file_externally(&path);
+                } else if has_ws {
+                    self.status_message = Some("No docs in this workspace".into());
+                }
+            }
+            _ => {}
         }
     }
 
     fn on_new(&mut self) {
-        if self.tab_index == 2 {
+        if self.tab_index == 1 {
             self.new_prompt_name = Some(String::new());
             self.status_message = Some("Enter prompt name, then press Enter".into());
+        } else if self.tab_index == 4 {
+            // OpenClaw tab - create workspace
+            self.on_create_workspace();
         }
     }
 
     fn on_delete(&mut self) {
-        if self.tab_index == 2 && self.list_selected < self.prompts.len() {
-            self.delete_confirm = Some(self.list_selected);
-            self.status_message = Some(format!(
-                "Delete '{}'? (y/n)",
-                self.prompts[self.list_selected].name
-            ));
+        if self.tab_index == 1 {
+            if let Some(idx) = self.selected_prompt_index() {
+                self.delete_confirm = Some(idx);
+                self.status_message = Some(format!(
+                    "Delete '{}'? (y/n)",
+                    self.prompts[idx].name
+                ));
+            }
         }
     }
 
     fn on_sync(&mut self) {
-        if self.tab_index == 4 {
+        if self.tab_index == 3 {
             // Sync tab — execute sync for all prompts (agents + projects)
             let home = self.home_dir.clone();
             let project_dirs = [home.join("Development")];
@@ -550,67 +1051,246 @@ impl App {
             ));
             self.list_selected = 0;
         } else {
-            self.status_message = Some("Sync: switch to Sync tab (5) to execute".into());
+            self.status_message = Some("Sync: switch to Sync tab (4) to execute".into());
         }
     }
 
     fn on_edit(&mut self) {
-        self.on_enter(); // Same as Enter - open in editor
+        if self.tab_index == 1 {
+            if let Some(idx) = self.selected_prompt_index() {
+                self.edit_with_external_editor(idx);
+            }
+        }
     }
 
     fn on_insert(&mut self) {
-        // In Skills tab: install selected skill
-        if self.tab_index == 3 {
-            if let Some(ref hub) = self.skill_hub {
-                let skills: Vec<_> = hub.skills.values().collect();
-                if self.list_selected < skills.len() {
-                    let skill = skills[self.list_selected];
-                    if !skill.installed {
-                        self.skill_confirm = Some(SkillConfirmAction::Install(skill.name.clone()));
-                        self.status_message = Some(format!("Install '{}'? (y/n)", skill.name));
-                    } else {
-                        self.status_message =
-                            Some(format!("'{}' is already installed", skill.name));
+        if self.tab_index == 2 {
+            if let Some(idx) = self.selected_skill_index() {
+                if let Some(ref hub) = self.skill_hub {
+                    let skills: Vec<_> = hub.skills.values().collect();
+                    if idx < skills.len() {
+                        let skill = skills[idx];
+                        if !skill.installed {
+                            self.skill_confirm =
+                                Some(SkillConfirmAction::Install(skill.name.clone()));
+                            self.status_message =
+                                Some(format!("Install '{}'? (y/n)", skill.name));
+                        } else {
+                            self.status_message =
+                                Some(format!("'{}' is already installed", skill.name));
+                        }
                     }
                 }
             }
         } else {
-            self.on_new(); // Same as 'n' - create new prompt
+            self.on_new();
+        }
+    }
+
+    fn method_prev(&mut self) {
+        if self.method_selected > 0 {
+            self.method_selected -= 1;
+        }
+    }
+
+    fn method_next(&mut self) {
+        if self.tab_index == 0 {
+            if let Some(agent) = self.detected_agents.get(self.list_selected) {
+                let max = agent.spec.install_methods.len();
+                if max > 0 && self.method_selected < max - 1 {
+                    self.method_selected += 1;
+                }
+            }
+        }
+    }
+
+    fn on_list_versions(&mut self) {
+        if self.tab_index != 0 {
+            return;
+        }
+        if let Some(agent) = self.detected_agents.get(self.list_selected) {
+            if let Some(method) = agent.spec.install_methods.get(self.method_selected) {
+                let cmd = match method.list_versions_command() {
+                    Some(c) => c,
+                    None => {
+                        self.status_message = Some("Version listing not supported for this method".into());
+                        return;
+                    }
+                };
+                self.status_message = Some("Fetching versions...".into());
+                match std::process::Command::new("sh").arg("-c").arg(&cmd).output() {
+                    Ok(output) if output.status.success() => {
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        // Parse versions depending on the method type
+                        let versions: Vec<String> = match method {
+                            agentry_core::models::InstallMethod::Brew { .. } => {
+                                // brew info --json=v2 returns JSON
+                                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&stdout) {
+                                    let v = val["versions"]["stable"].as_str().unwrap_or("unknown");
+                                    vec![v.to_string()]
+                                } else {
+                                    vec!["parse error".into()]
+                                }
+                            }
+                            agentry_core::models::InstallMethod::Npm { .. } => {
+                                serde_json::from_str::<Vec<String>>(&stdout).unwrap_or_default()
+                            }
+                            _ => {
+                                stdout.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect()
+                            }
+                        };
+                        if versions.is_empty() {
+                            self.version_list_error = Some("No versions found".into());
+                        } else {
+                            self.version_list = Some(versions);
+                            self.status_message = Some("Versions loaded. Select with j/k, Enter to confirm".into());
+                        }
+                    }
+                    Ok(_) => {
+                        self.version_list_error = Some("Version command failed".into());
+                    }
+                    Err(e) => {
+                        self.version_list_error = Some(format!("Error: {}", e));
+                    }
+                }
+            }
+        }
+    }
+
+    fn execute_agent_action(&mut self, action: AgentConfirmAction) {
+        use crossterm::{
+            execute,
+            terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+        };
+
+        let cmd = match &action {
+            AgentConfirmAction::Install { method, version, .. } => {
+                method.install_command(version.as_deref())
+            }
+            AgentConfirmAction::Update { method, .. } => method.update_command(),
+            AgentConfirmAction::Remove { method, .. } => method.remove_command(),
+        };
+
+        // Suspend TUI
+        let _ = disable_raw_mode();
+        let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
+
+        let status = std::process::Command::new("sh").arg("-c").arg(&cmd).status();
+
+        // Restore TUI
+        let _ = execute!(std::io::stdout(), EnterAlternateScreen);
+        let _ = enable_raw_mode();
+        self.needs_terminal_clear = true;
+
+        match status {
+            Ok(s) if s.success() => {
+                let verb = match &action {
+                    AgentConfirmAction::Install { .. } => "Installed",
+                    AgentConfirmAction::Update { .. } => "Updated",
+                    AgentConfirmAction::Remove { .. } => "Removed",
+                };
+                self.status_message = Some(format!("{} {}", verb, action.agent_id()));
+                // Re-detect agents synchronously (in a TUI context we use block_on)
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    self.detected_agents = agentry_agents::detect_all_agents().await;
+                });
+            }
+            Ok(_) => {
+                self.error_message = Some(format!("Command failed for {}", action.agent_id()));
+            }
+            Err(e) => {
+                self.error_message = Some(format!("Failed to run command: {}", e));
+            }
         }
     }
 
     fn on_update(&mut self) {
-        if self.tab_index == 3 {
-            // Skills tab - update selected or all
-            if let Some(ref hub) = self.skill_hub {
-                let skills: Vec<_> = hub.skills.values().collect();
-                if self.list_selected < skills.len() {
-                    let skill = skills[self.list_selected];
-                    if skill.installed {
-                        self.skill_confirm = Some(SkillConfirmAction::Update(skill.name.clone()));
-                        self.status_message = Some(format!("Update '{}'? (y/n)", skill.name));
+        if self.tab_index == 0 {
+            // Agents tab: update via selected method
+            if let Some(agent) = self.detected_agents.get(self.list_selected) {
+                if let Some(method) = agent.spec.install_methods.get(self.method_selected) {
+                    if agent.detected_methods.contains(method) {
+                        self.agent_confirm = Some(AgentConfirmAction::Update {
+                            agent_id: agent.spec.id.clone(),
+                            method: method.clone(),
+                        });
+                        self.status_message = Some(format!(
+                            "Update {} via {}? (y/n)",
+                            agent.spec.name,
+                            method.label()
+                        ));
                     } else {
-                        self.status_message = Some(format!("'{}' is not installed", skill.name));
+                        self.status_message = Some(format!(
+                            "{} is not installed via {}",
+                            agent.spec.name,
+                            method.label()
+                        ));
+                    }
+                }
+            }
+        } else if self.tab_index == 2 {
+            if let Some(idx) = self.selected_skill_index() {
+                if let Some(ref hub) = self.skill_hub {
+                    let skills: Vec<_> = hub.skills.values().collect();
+                    if idx < skills.len() {
+                        let skill = skills[idx];
+                        if skill.installed {
+                            self.skill_confirm =
+                                Some(SkillConfirmAction::Update(skill.name.clone()));
+                            self.status_message =
+                                Some(format!("Update '{}'? (y/n)", skill.name));
+                        } else {
+                            self.status_message =
+                                Some(format!("'{}' is not installed", skill.name));
+                        }
                     }
                 }
             }
         } else {
-            self.status_message = Some("Update: only available in Skills tab".into());
+            self.status_message = Some("Update: only available in Agents and Skills tabs".into());
         }
     }
 
     fn on_remove(&mut self) {
-        if self.tab_index == 3 {
-            // Skills tab - remove selected skill
-            if let Some(ref hub) = self.skill_hub {
-                let skills: Vec<_> = hub.skills.values().collect();
-                if self.list_selected < skills.len() {
-                    let skill = skills[self.list_selected];
-                    if skill.installed {
-                        self.skill_confirm = Some(SkillConfirmAction::Remove(skill.name.clone()));
-                        self.status_message = Some(format!("Remove '{}'? (y/n)", skill.name));
+        if self.tab_index == 0 {
+            // Agents tab: remove via selected method
+            if let Some(agent) = self.detected_agents.get(self.list_selected) {
+                if let Some(method) = agent.spec.install_methods.get(self.method_selected) {
+                    if agent.detected_methods.contains(method) {
+                        self.agent_confirm = Some(AgentConfirmAction::Remove {
+                            agent_id: agent.spec.id.clone(),
+                            method: method.clone(),
+                        });
+                        self.status_message = Some(format!(
+                            "Remove {} via {}? (y/n)",
+                            agent.spec.name,
+                            method.label()
+                        ));
                     } else {
-                        self.status_message = Some(format!("'{}' is not installed", skill.name));
+                        self.status_message = Some(format!(
+                            "{} is not installed via {}",
+                            agent.spec.name,
+                            method.label()
+                        ));
+                    }
+                }
+            }
+        } else if self.tab_index == 2 {
+            if let Some(idx) = self.selected_skill_index() {
+                if let Some(ref hub) = self.skill_hub {
+                    let skills: Vec<_> = hub.skills.values().collect();
+                    if idx < skills.len() {
+                        let skill = skills[idx];
+                        if skill.installed {
+                            self.skill_confirm =
+                                Some(SkillConfirmAction::Remove(skill.name.clone()));
+                            self.status_message =
+                                Some(format!("Remove '{}'? (y/n)", skill.name));
+                        } else {
+                            self.status_message =
+                                Some(format!("'{}' is not installed", skill.name));
+                        }
                     }
                 }
             }
@@ -618,19 +1298,17 @@ impl App {
     }
 
     fn on_github(&mut self) {
-        if self.tab_index == 3 {
-            // Skills tab - open GitHub source in browser
-            if let Some(ref hub) = self.skill_hub {
-                let skills: Vec<_> = hub.skills.values().collect();
-                if self.list_selected < skills.len() {
-                    let skill = skills[self.list_selected];
-                    if !skill.source_url.is_empty() {
-                        let url = skill.source_url.clone();
-                        self.status_message = Some(format!("Open: {}", url));
-                        // Intentionally ignoring errors: if the browser can't be opened,
-                        // the user already saw the URL in the status message and can
-                        // open it manually. No further action is useful on failure.
-                        let _ = std::process::Command::new("open").arg(&url).spawn();
+        if self.tab_index == 2 {
+            if let Some(idx) = self.selected_skill_index() {
+                if let Some(ref hub) = self.skill_hub {
+                    let skills: Vec<_> = hub.skills.values().collect();
+                    if idx < skills.len() {
+                        let skill = skills[idx];
+                        if !skill.source_url.is_empty() {
+                            let url = skill.source_url.clone();
+                            self.status_message = Some(format!("Open: {}", url));
+                            let _ = std::process::Command::new("open").arg(&url).spawn();
+                        }
                     }
                 }
             }
@@ -713,11 +1391,6 @@ impl App {
         match self.mode {
             AppMode::Intro => ui::draw_intro(f, self),
             AppMode::Dashboard => ui::draw_dashboard(f, self),
-            AppMode::Editor => {
-                if let Some(ref editor) = self.editor {
-                    ui::draw_editor(f, editor);
-                }
-            }
             AppMode::Quit => {}
         }
     }
@@ -727,7 +1400,7 @@ impl App {
     }
 
     fn on_create_workspace(&mut self) {
-        if self.tab_index == 5 {
+        if self.tab_index == 4 {
             if agentry_openclaw::discovery::is_openclaw_installed() {
                 self.status_message = Some("Run: openclaw setup".into());
                 let _ = std::process::Command::new("openclaw").arg("setup").spawn();
@@ -739,7 +1412,7 @@ impl App {
     }
 
     fn on_add_agent(&mut self) {
-        if self.tab_index == 5 {
+        if self.tab_index == 4 {
             if agentry_openclaw::discovery::is_openclaw_installed() {
                 self.status_message = Some("Run: openclaw agents add <name>".into());
                 // Could prompt for name in the future, for now show guidance
@@ -750,15 +1423,12 @@ impl App {
     }
 
     fn on_workflow(&mut self) {
-        if self.tab_index == 4 {
-            // Sync tab — trigger workflow for current sync entry
+        if self.tab_index == 3 {
             if !self.acp_capabilities.is_empty() {
-                // Use the currently selected sync result as the task context
-                let task = if self.list_selected < self.sync_results.len() {
+                let task = if let Some(entry) = self.selected_sync_entry() {
                     format!(
                         "Sync {} to {}",
-                        self.sync_results[self.list_selected].prompt_name,
-                        self.sync_results[self.list_selected].agent_id
+                        entry.prompt_name, entry.agent_id
                     )
                 } else {
                     "Sync all prompts".to_string()
@@ -795,7 +1465,7 @@ impl App {
             }
         } else {
             self.status_message =
-                Some("Workflow: switch to Sync tab (5) to generate workflows".into());
+                Some("Workflow: switch to Sync tab (4) to generate workflows".into());
         }
     }
 }

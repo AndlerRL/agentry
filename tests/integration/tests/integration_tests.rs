@@ -41,6 +41,7 @@ fn make_detected_agent(id: &str, name: &str, config_dir: &str) -> DetectedAgent 
             prompt_format: PromptFormat::PlainMd,
             skills_dir_name: None,
             max_size: None,
+            install_methods: vec![],
         },
         installed: true,
         version: None,
@@ -49,6 +50,7 @@ fn make_detected_agent(id: &str, name: &str, config_dir: &str) -> DetectedAgent 
         skills_dir: None,
         skills_symlink_pattern: None,
         installed_skills: vec![],
+        detected_methods: vec![],
     }
 }
 
@@ -85,6 +87,7 @@ fn test_agent_detection_and_sync_pipeline() {
         prompt_format: PromptFormat::PlainMd,
         skills_dir_name: None,
         max_size: None,
+        install_methods: vec![],
     };
 
     let gemini_spec = AgentSpec {
@@ -96,6 +99,7 @@ fn test_agent_detection_and_sync_pipeline() {
         prompt_format: PromptFormat::PlainMd,
         skills_dir_name: None,
         max_size: None,
+        install_methods: vec![],
     };
 
     let agents = vec![
@@ -108,6 +112,7 @@ fn test_agent_detection_and_sync_pipeline() {
             skills_dir: None,
             skills_symlink_pattern: None,
             installed_skills: vec![],
+            detected_methods: vec![],
         },
         DetectedAgent {
             spec: gemini_spec,
@@ -118,6 +123,7 @@ fn test_agent_detection_and_sync_pipeline() {
             skills_dir: None,
             skills_symlink_pattern: None,
             installed_skills: vec![],
+            detected_methods: vec![],
         },
     ];
 

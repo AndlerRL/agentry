@@ -31,6 +31,208 @@ impl std::fmt::Display for PromptFormat {
     }
 }
 
+/// How an agent was or can be installed on the system.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum InstallMethod {
+    Brew { formula: String, cask: bool },
+    Npm { package: String },
+    Cargo { crate_name: String },
+    Pip { package: String },
+    VsCodeExtension { extension_id: String },
+    JetBrainsPlugin { plugin_id: String },
+    DirectDownload { url: String, binary_name: String },
+    AppBundle { app_name: String },
+    BuiltIn,
+    Other { description: String, install_cmd: String },
+}
+
+impl InstallMethod {
+    /// Human-readable label for display.
+    pub fn label(&self) -> &'static str {
+        match self {
+            InstallMethod::Brew { cask, .. } if *cask => "Homebrew Cask",
+            InstallMethod::Brew { .. } => "Homebrew",
+            InstallMethod::Npm { .. } => "npm",
+            InstallMethod::Cargo { .. } => "Cargo",
+            InstallMethod::Pip { .. } => "pip",
+            InstallMethod::VsCodeExtension { .. } => "VS Code Ext",
+            InstallMethod::JetBrainsPlugin { .. } => "JetBrains Plugin",
+            InstallMethod::DirectDownload { .. } => "Direct Download",
+            InstallMethod::AppBundle { .. } => "macOS App",
+            InstallMethod::BuiltIn => "Built-in",
+            InstallMethod::Other { .. } => "Other",
+        }
+    }
+
+    /// Compact key for badge display (e.g. "brew", "npm").
+    pub fn method_key(&self) -> &'static str {
+        match self {
+            InstallMethod::Brew { .. } => "brew",
+            InstallMethod::Npm { .. } => "npm",
+            InstallMethod::Cargo { .. } => "cargo",
+            InstallMethod::Pip { .. } => "pip",
+            InstallMethod::VsCodeExtension { .. } => "vscode",
+            InstallMethod::JetBrainsPlugin { .. } => "jb",
+            InstallMethod::DirectDownload { .. } => "dl",
+            InstallMethod::AppBundle { .. } => "app",
+            InstallMethod::BuiltIn => "builtin",
+            InstallMethod::Other { .. } => "other",
+        }
+    }
+
+    /// Whether this install method is available on the current OS.
+    pub fn available_on_os(&self) -> bool {
+        match self {
+            InstallMethod::Brew { .. } => cfg!(any(target_os = "macos", target_os = "linux")),
+            InstallMethod::AppBundle { .. } => cfg!(target_os = "macos"),
+            InstallMethod::Npm { .. } => which_exists("npm"),
+            InstallMethod::Cargo { .. } => which_exists("cargo"),
+            InstallMethod::Pip { .. } => which_exists("pip3") || which_exists("pip"),
+            InstallMethod::VsCodeExtension { .. } => {
+                std::env::var("HOME")
+                    .map(|h| std::path::PathBuf::from(h).join(".vscode").join("extensions").exists())
+                    .unwrap_or(false)
+            }
+            InstallMethod::JetBrainsPlugin { .. } => cfg!(any(target_os = "macos", target_os = "linux", target_os = "windows")),
+            InstallMethod::DirectDownload { .. } | InstallMethod::BuiltIn | InstallMethod::Other { .. } => true,
+        }
+    }
+
+    /// Shell command to install this package (None = latest, Some = specific version).
+    pub fn install_command(&self, version: Option<&str>) -> String {
+        match self {
+            InstallMethod::Brew { formula, cask } => {
+                let flag = if *cask { " --cask" } else { "" };
+                format!("brew install{flag} {formula}")
+            }
+            InstallMethod::Npm { package } => {
+                if let Some(v) = version {
+                    format!("npm install -g {package}@{v}")
+                } else {
+                    format!("npm install -g {package}")
+                }
+            }
+            InstallMethod::Cargo { crate_name } => {
+                if let Some(v) = version {
+                    format!("cargo install {crate_name} --version {v}")
+                } else {
+                    format!("cargo install {crate_name}")
+                }
+            }
+            InstallMethod::Pip { package } => {
+                let pip = if which_exists("pip3") { "pip3" } else { "pip" };
+                if let Some(v) = version {
+                    format!("{pip} install {package}=={v}")
+                } else {
+                    format!("{pip} install {package}")
+                }
+            }
+            InstallMethod::VsCodeExtension { extension_id } => {
+                format!("code --install-extension {extension_id}")
+            }
+            InstallMethod::DirectDownload { url, .. } => {
+                format!("curl -fsSL {url} | sh")
+            }
+            InstallMethod::Other { install_cmd, .. } => install_cmd.clone(),
+            _ => "echo 'No automatic install available'".to_string(),
+        }
+    }
+
+    /// Shell command to update this package.
+    pub fn update_command(&self) -> String {
+        match self {
+            InstallMethod::Brew { formula, cask } => {
+                let flag = if *cask { " --cask" } else { "" };
+                format!("brew upgrade{flag} {formula}")
+            }
+            InstallMethod::Npm { package } => format!("npm update -g {package}"),
+            InstallMethod::Cargo { crate_name } => format!("cargo install --force {crate_name}"),
+            InstallMethod::Pip { package } => {
+                let pip = if which_exists("pip3") { "pip3" } else { "pip" };
+                format!("{pip} install --upgrade {package}")
+            }
+            InstallMethod::VsCodeExtension { extension_id } => {
+                format!("code --install-extension {extension_id} --force")
+            }
+            _ => "echo 'No automatic update available'".to_string(),
+        }
+    }
+
+    /// Shell command to remove/uninstall this package.
+    pub fn remove_command(&self) -> String {
+        match self {
+            InstallMethod::Brew { formula, cask } => {
+                let flag = if *cask { " --cask" } else { "" };
+                format!("brew uninstall{flag} {formula}")
+            }
+            InstallMethod::Npm { package } => format!("npm uninstall -g {package}"),
+            InstallMethod::Cargo { crate_name } => format!("brew uninstall {crate_name}"),
+            InstallMethod::Pip { package } => {
+                let pip = if which_exists("pip3") { "pip3" } else { "pip" };
+                format!("{pip} uninstall -y {package}")
+            }
+            InstallMethod::VsCodeExtension { extension_id } => {
+                format!("code --uninstall-extension {extension_id}")
+            }
+            _ => "echo 'No automatic remove available'".to_string(),
+        }
+    }
+
+    /// Shell command to list available versions. Returns None if not supported.
+    pub fn list_versions_command(&self) -> Option<String> {
+        match self {
+            InstallMethod::Brew { formula, cask } if !cask => {
+                Some(format!("brew info --json=v2 {formula}"))
+            }
+            InstallMethod::Npm { package } => {
+                Some(format!("npm view {package} versions --json"))
+            }
+            InstallMethod::Cargo { crate_name } => {
+                Some(format!("cargo search {crate_name} --limit 1"))
+            }
+            InstallMethod::Pip { package } => {
+                let pip = if which_exists("pip3") { "pip3" } else { "pip" };
+                Some(format!("{pip} index versions {package} 2>/dev/null"))
+            }
+            _ => None,
+        }
+    }
+
+    /// Identifier string (formula name, package name, etc.) for display.
+    pub fn identifier(&self) -> &str {
+        match self {
+            InstallMethod::Brew { formula, .. } => formula.as_str(),
+            InstallMethod::Npm { package } => package.as_str(),
+            InstallMethod::Cargo { crate_name } => crate_name.as_str(),
+            InstallMethod::Pip { package } => package.as_str(),
+            InstallMethod::VsCodeExtension { extension_id } => extension_id.as_str(),
+            InstallMethod::JetBrainsPlugin { plugin_id } => plugin_id.as_str(),
+            InstallMethod::DirectDownload { binary_name, .. } => binary_name.as_str(),
+            InstallMethod::AppBundle { app_name } => app_name.as_str(),
+            InstallMethod::BuiltIn => "system",
+            InstallMethod::Other { description, .. } => description.as_str(),
+        }
+    }
+}
+
+impl std::fmt::Display for InstallMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.label())
+    }
+}
+
+/// Check if a binary exists on PATH.
+fn which_exists(binary: &str) -> bool {
+    std::env::var("PATH")
+        .unwrap_or_default()
+        .split(':')
+        .any(|dir| {
+            let path = std::path::PathBuf::from(dir).join(binary);
+            path.exists()
+        })
+}
+
 /// Scope of a prompt: global (user-wide) or project-specific.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -91,6 +293,9 @@ pub struct DetectedAgent {
     pub skills_dir: Option<PathBuf>,
     pub skills_symlink_pattern: Option<String>,
     pub installed_skills: Vec<String>,
+    /// Which install methods were detected on this system.
+    #[serde(default)]
+    pub detected_methods: Vec<InstallMethod>,
 }
 
 impl DetectedAgent {
@@ -99,6 +304,19 @@ impl DetectedAgent {
             "ON"
         } else {
             "OFF"
+        }
+    }
+
+    /// Returns a comma-separated list of detected install method keys.
+    pub fn detected_method_keys(&self) -> String {
+        if self.detected_methods.is_empty() {
+            String::new()
+        } else {
+            self.detected_methods
+                .iter()
+                .map(|m| m.method_key().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
         }
     }
 }
@@ -115,6 +333,9 @@ pub struct AgentSpec {
     pub skills_dir_name: Option<String>,
     /// Max prompt file size in bytes (None = no limit)
     pub max_size: Option<usize>,
+    /// Known install methods for this agent (ordered by preference).
+    #[serde(default)]
+    pub install_methods: Vec<InstallMethod>,
 }
 
 /// A skill entry from the skill hub.

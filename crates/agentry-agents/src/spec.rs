@@ -1,4 +1,4 @@
-use agentry_core::models::{AgentSpec, PromptFormat};
+use agentry_core::models::{AgentSpec, InstallMethod, PromptFormat};
 
 /// All 11 known agent specifications.
 pub fn all_agent_specs() -> Vec<AgentSpec> {
@@ -12,6 +12,15 @@ pub fn all_agent_specs() -> Vec<AgentSpec> {
             prompt_format: PromptFormat::PlainMd,
             skills_dir_name: Some("skills".into()),
             max_size: None,
+            install_methods: vec![
+                InstallMethod::DirectDownload {
+                    url: "https://claude.ai/install.sh".into(),
+                    binary_name: "claude".into(),
+                },
+                InstallMethod::Brew { formula: "claude-code".into(), cask: true },
+                InstallMethod::Npm { package: "@anthropic-ai/claude-code".into() },
+                InstallMethod::VsCodeExtension { extension_id: "anthropic.claude-code".into() },
+            ],
         },
         AgentSpec {
             id: "continue".into(),
@@ -22,6 +31,15 @@ pub fn all_agent_specs() -> Vec<AgentSpec> {
             prompt_format: PromptFormat::XmlTagMd,
             skills_dir_name: None,
             max_size: None,
+            install_methods: vec![
+                InstallMethod::VsCodeExtension { extension_id: "Continue.continue".into() },
+                InstallMethod::JetBrainsPlugin { plugin_id: "com.continue.continue".into() },
+                InstallMethod::Npm { package: "@continuedev/cli".into() },
+                InstallMethod::DirectDownload {
+                    url: "https://raw.githubusercontent.com/continuedev/continue/main/extensions/cli/scripts/install.sh".into(),
+                    binary_name: "cn".into(),
+                },
+            ],
         },
         AgentSpec {
             id: "gemini-cli".into(),
@@ -32,6 +50,10 @@ pub fn all_agent_specs() -> Vec<AgentSpec> {
             prompt_format: PromptFormat::PlainMd,
             skills_dir_name: None,
             max_size: None,
+            install_methods: vec![
+                InstallMethod::Npm { package: "@google/gemini-cli".into() },
+                InstallMethod::Brew { formula: "gemini-cli".into(), cask: false },
+            ],
         },
         AgentSpec {
             id: "codex".into(),
@@ -42,6 +64,14 @@ pub fn all_agent_specs() -> Vec<AgentSpec> {
             prompt_format: PromptFormat::PlainMd,
             skills_dir_name: None,
             max_size: Some(32768), // 32 KiB limit
+            install_methods: vec![
+                InstallMethod::Npm { package: "@openai/codex".into() },
+                InstallMethod::Brew { formula: "codex".into(), cask: true },
+                InstallMethod::DirectDownload {
+                    url: "https://github.com/openai/codex/releases".into(),
+                    binary_name: "codex".into(),
+                },
+            ],
         },
         AgentSpec {
             id: "opencode".into(),
@@ -52,6 +82,14 @@ pub fn all_agent_specs() -> Vec<AgentSpec> {
             prompt_format: PromptFormat::FrontmatterMd,
             skills_dir_name: None,
             max_size: None,
+            install_methods: vec![
+                InstallMethod::Npm { package: "opencode-ai".into() },
+                InstallMethod::Brew { formula: "opencode".into(), cask: false },
+                InstallMethod::DirectDownload {
+                    url: "https://opencode.ai/install".into(),
+                    binary_name: "opencode".into(),
+                },
+            ],
         },
         AgentSpec {
             id: "amp".into(),
@@ -62,6 +100,13 @@ pub fn all_agent_specs() -> Vec<AgentSpec> {
             prompt_format: PromptFormat::PlainMd,
             skills_dir_name: None,
             max_size: None,
+            install_methods: vec![
+                InstallMethod::Npm { package: "@sourcegraph/amp".into() },
+                InstallMethod::DirectDownload {
+                    url: "https://ampcode.com/install.sh".into(),
+                    binary_name: "amp".into(),
+                },
+            ],
         },
         AgentSpec {
             id: "firebender".into(),
@@ -72,6 +117,9 @@ pub fn all_agent_specs() -> Vec<AgentSpec> {
             prompt_format: PromptFormat::Mdc,
             skills_dir_name: None,
             max_size: None,
+            install_methods: vec![
+                InstallMethod::JetBrainsPlugin { plugin_id: "com.firebender.firebender".into() },
+            ],
         },
         AgentSpec {
             id: "openclaw".into(),
@@ -82,6 +130,13 @@ pub fn all_agent_specs() -> Vec<AgentSpec> {
             prompt_format: PromptFormat::PlainMd,
             skills_dir_name: None,
             max_size: None,
+            install_methods: vec![
+                InstallMethod::Npm { package: "openclaw".into() },
+                InstallMethod::DirectDownload {
+                    url: "https://openclaw.ai/install.sh".into(),
+                    binary_name: "openclaw".into(),
+                },
+            ],
         },
         AgentSpec {
             id: "deepagents".into(),
@@ -92,6 +147,13 @@ pub fn all_agent_specs() -> Vec<AgentSpec> {
             prompt_format: PromptFormat::PlainMd,
             skills_dir_name: None,
             max_size: None,
+            install_methods: vec![
+                InstallMethod::Pip { package: "deepagents-cli".into() },
+                InstallMethod::DirectDownload {
+                    url: "https://langch.in/gh-da-cli".into(),
+                    binary_name: "deepagents".into(),
+                },
+            ],
         },
         AgentSpec {
             id: "antigravity".into(),
@@ -102,6 +164,12 @@ pub fn all_agent_specs() -> Vec<AgentSpec> {
             prompt_format: PromptFormat::FrontmatterMd,
             skills_dir_name: None,
             max_size: None,
+            install_methods: vec![
+                InstallMethod::DirectDownload {
+                    url: "https://antigravity.google/download".into(),
+                    binary_name: "antigravity".into(),
+                },
+            ],
         },
         AgentSpec {
             id: "warp".into(),
@@ -112,6 +180,10 @@ pub fn all_agent_specs() -> Vec<AgentSpec> {
             prompt_format: PromptFormat::FrontmatterMd,
             skills_dir_name: None,
             max_size: None,
+            install_methods: vec![
+                InstallMethod::Brew { formula: "warp".into(), cask: true },
+                InstallMethod::AppBundle { app_name: "Warp.app".into() },
+            ],
         },
     ]
 }

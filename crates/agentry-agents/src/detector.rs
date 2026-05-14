@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use agentry_core::models::{AgentSpec, DetectedAgent};
+use agentry_core::models::{AgentSpec, DetectedAgent, InstallMethod};
 
 use crate::spec::all_agent_specs;
 
@@ -46,7 +46,16 @@ pub fn detect_agent(spec: &AgentSpec) -> DetectedAgent {
         Vec::new()
     };
 
-    let installed = binary_found || config_dir_exists;
+    // Detect install methods (filtered by OS availability)
+    let detected_methods: Vec<InstallMethod> = spec
+        .install_methods
+        .iter()
+        .filter(|method| method.available_on_os())
+        .filter(|method| detect_install_method(method))
+        .cloned()
+        .collect();
+
+    let installed = !detected_methods.is_empty() || binary_found || config_dir_exists;
 
     DetectedAgent {
         spec: spec.clone(),
@@ -57,6 +66,7 @@ pub fn detect_agent(spec: &AgentSpec) -> DetectedAgent {
         skills_dir: if skills_dir_exists { skills_dir } else { None },
         skills_symlink_pattern,
         installed_skills,
+        detected_methods,
     }
 }
 
@@ -114,6 +124,176 @@ fn get_version(binary: &str) -> Option<String> {
         .split_whitespace()
         .find(|s| s.chars().any(|c| c.is_ascii_digit()))?;
     Some(version.to_string())
+}
+
+/// Dispatch to the correct detector for an install method.
+fn detect_install_method(method: &InstallMethod) -> bool {
+    match method {
+        InstallMethod::Brew { formula, .. } => detect_brew_package(formula),
+        InstallMethod::Npm { package } => detect_npm_package(package),
+        InstallMethod::Cargo { crate_name } => detect_cargo_crate(crate_name),
+        InstallMethod::Pip { package } => detect_pip_package(package),
+        InstallMethod::VsCodeExtension { extension_id } => detect_vscode_extension(extension_id),
+        InstallMethod::JetBrainsPlugin { plugin_id } => detect_jetbrains_plugin(plugin_id),
+        InstallMethod::DirectDownload { binary_name, .. } => detect_direct_binary(binary_name),
+        InstallMethod::AppBundle { app_name } => detect_app_bundle(app_name),
+        InstallMethod::BuiltIn => which_binary("builtin_noop"), // always false, BuiltIn is informational
+        InstallMethod::Other { .. } => false,
+    }
+}
+
+fn detect_brew_package(formula: &str) -> bool {
+    Command::new("brew")
+        .args(["list", "--formula", formula])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn detect_npm_package(package: &str) -> bool {
+    if !which_binary("npm") {
+        return false;
+    }
+    Command::new("npm")
+        .args(["list", "-g", "--depth=0", package])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn detect_cargo_crate(crate_name: &str) -> bool {
+    if !which_binary("cargo") {
+        return false;
+    }
+    match Command::new("cargo").args(["install", "--list"]).output() {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            stdout.lines().any(|line| line.contains(crate_name) && !line.starts_with(' '))
+        }
+        Err(_) => false,
+    }
+}
+
+fn detect_pip_package(package: &str) -> bool {
+    let pip = if which_binary("pip3") { "pip3" } else { "pip" };
+    if !which_binary(pip) {
+        return false;
+    }
+    Command::new(pip)
+        .args(["show", package])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn detect_vscode_extension(extension_id: &str) -> bool {
+    let home = dirs_home();
+    let ext_dir = home.join(".vscode").join("extensions");
+    if !ext_dir.is_dir() {
+        return false;
+    }
+    // Extensions are stored as <publisher>.<name>-<version> directories
+    match std::fs::read_dir(&ext_dir) {
+        Ok(entries) => entries
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().starts_with(extension_id)),
+        Err(_) => false,
+    }
+}
+
+fn detect_jetbrains_plugin(_plugin_id: &str) -> bool {
+    // JetBrains plugin detection is complex and platform-specific.
+    // For now, check if any JetBrains config directory exists.
+    let home = dirs_home();
+    #[cfg(target_os = "macos")]
+    let base = home.join("Library").join("Application Support").join("JetBrains");
+    #[cfg(not(target_os = "macos"))]
+    let base = home.join(".config").join("JetBrains");
+
+    base.is_dir()
+}
+
+fn detect_app_bundle(app_name: &str) -> bool {
+    let apps_dir = Path::new("/Applications").join(app_name);
+    let user_apps = dirs_home().join("Applications").join(app_name);
+    apps_dir.exists() || user_apps.exists()
+}
+
+fn detect_direct_binary(binary_name: &str) -> bool {
+    if which_binary(binary_name) {
+        return true;
+    }
+    let home = dirs_home();
+    home.join(".local").join("bin").join(binary_name).exists()
+        || home.join("bin").join(binary_name).exists()
+        || Path::new("/usr/local/bin").join(binary_name).exists()
+}
+
+/// List available versions for a brew formula.
+pub fn list_brew_versions(formula: &str) -> Result<Vec<String>, String> {
+    let output = Command::new("brew")
+        .args(["info", "--json=v2", formula])
+        .output()
+        .map_err(|e| format!("Failed to run brew: {}", e))?;
+
+    if !output.status.success() {
+        return Err("brew info failed".to_string());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).map_err(|e| format!("JSON parse: {}", e))?;
+
+    let versions = parsed["versions"]["stable"]
+        .as_str()
+        .map(|v| vec![v.to_string()])
+        .unwrap_or_default();
+
+    Ok(versions)
+}
+
+/// List available versions for an npm package.
+pub fn list_npm_versions(package: &str) -> Result<Vec<String>, String> {
+    let output = Command::new("npm")
+        .args(["view", package, "versions", "--json"])
+        .output()
+        .map_err(|e| format!("Failed to run npm: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "npm view failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let versions: Vec<String> =
+        serde_json::from_str(&stdout).map_err(|e| format!("JSON parse: {}", e))?;
+
+    Ok(versions)
+}
+
+/// List latest version for a cargo crate (cargo does not expose full version history).
+pub fn list_cargo_versions(crate_name: &str) -> Result<Vec<String>, String> {
+    let output = Command::new("cargo")
+        .args(["search", crate_name, "--limit", "1"])
+        .output()
+        .map_err(|e| format!("Failed to run cargo: {}", e))?;
+
+    if !output.status.success() {
+        return Err("cargo search failed".to_string());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // cargo search output: "cratename = "1.2.3"    # description"
+    for line in stdout.lines() {
+        if line.starts_with(crate_name) {
+            if let Some(version_part) = line.split('"').nth(1) {
+                return Ok(vec![version_part.to_string()]);
+            }
+        }
+    }
+    Err("Version not found".to_string())
 }
 
 /// Detect the symlink pattern used in a skills directory.
@@ -372,6 +552,7 @@ mod tests {
             prompt_format: PromptFormat::PlainMd,
             skills_dir_name: None,
             max_size: None,
+            install_methods: Vec::new(),
         };
 
         let detected = detect_agent(&spec);

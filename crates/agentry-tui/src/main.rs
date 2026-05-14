@@ -1,5 +1,4 @@
 mod app;
-mod editor;
 mod event;
 mod ui;
 
@@ -155,7 +154,44 @@ async fn cmd_detect() -> Result<()> {
     for agent in &agents {
         let status = if agent.installed { "✓" } else { "✗" };
         let version = agent.version.as_deref().unwrap_or("---");
-        println!("  {} {:<16} v{}", status, agent.spec.name, version);
+
+        if agent.installed {
+            let detected_labels: Vec<&str> = agent
+                .detected_methods
+                .iter()
+                .map(|m| m.label())
+                .collect();
+            if detected_labels.is_empty() {
+                println!("  {} {:<18} v{:<8}", status, agent.spec.name, version);
+            } else {
+                println!(
+                    "  {} {:<18} v{:<8} via {}",
+                    status,
+                    agent.spec.name,
+                    version,
+                    detected_labels.join(", ")
+                );
+            }
+        } else {
+            let available: Vec<&str> = agent
+                .spec
+                .install_methods
+                .iter()
+                .filter(|m| m.available_on_os())
+                .map(|m| m.method_key())
+                .collect();
+            if available.is_empty() {
+                println!("  {} {:<18} {:<8}", status, agent.spec.name, "---");
+            } else {
+                println!(
+                    "  {} {:<18} {:<8} [available: {}]",
+                    status,
+                    agent.spec.name,
+                    "---",
+                    available.join(", ")
+                );
+            }
+        }
     }
     Ok(())
 }

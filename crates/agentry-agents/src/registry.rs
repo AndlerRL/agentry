@@ -62,6 +62,7 @@ mod tests {
                 prompt_format: PromptFormat::PlainMd,
                 skills_dir_name: None,
                 max_size: None,
+                install_methods: Vec::new(),
             },
             installed,
             version: if installed {
@@ -74,6 +75,7 @@ mod tests {
             skills_dir: None,
             skills_symlink_pattern: None,
             installed_skills: Vec::new(),
+            detected_methods: Vec::new(),
         }
     }
 
