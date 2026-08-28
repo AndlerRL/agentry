@@ -7,6 +7,7 @@ members = [
     "crates/agentry-skills",
     "crates/agentry-openclaw",
     "crates/agentry-acp",
+    "crates/agentry-audit",
     "crates/agentry-tui",
     "tests/integration",
 ]
@@ -45,6 +46,9 @@ git2 = "0.19"
 
 # Crypto
 sha1 = "0.10"
+
+# Versioning
+semver = "1"
 
 # Platform
 dirs = "6"

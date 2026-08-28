@@ -3,6 +3,7 @@ use std::process::Command;
 
 use agentry_core::models::{AgentSpec, DetectedAgent, InstallMethod};
 
+use crate::error::AgentError;
 use crate::spec::all_agent_specs;
 
 /// Detect a single agent on the system.
@@ -299,6 +300,80 @@ pub fn list_cargo_versions(crate_name: &str) -> Result<Vec<String>, String> {
         }
     }
     Err("Version not found".to_string())
+}
+
+pub fn verify_symlink_target(path: &Path) -> bool {
+    if !path.is_symlink() {
+        return true;
+    }
+    match std::fs::read_link(path) {
+        Ok(target) => {
+            std::fs::canonicalize(path.parent().unwrap_or(Path::new(".")).join(target)).is_ok()
+        }
+        Err(_) => false,
+    }
+}
+
+pub fn list_pip_versions(package: &str) -> Result<Vec<String>, AgentError> {
+    let pip = if which_binary("pip3") { "pip3" } else { "pip" };
+    if !which_binary(pip) {
+        return Err(AgentError::Io {
+            path: pip.to_string(),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "pip not found"),
+        });
+    }
+
+    let output = Command::new(pip)
+        .args(["index", "versions", package])
+        .output()
+        .map_err(|e| AgentError::Io {
+            path: pip.to_string(),
+            source: e,
+        })?;
+
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let versions = parse_pip_versions(&stdout);
+        if !versions.is_empty() {
+            return Ok(versions);
+        }
+    }
+
+    let fallback = Command::new(pip)
+        .args(["install", &format!("{}==", package)])
+        .output()
+        .map_err(|e| AgentError::Io {
+            path: pip.to_string(),
+            source: e,
+        })?;
+
+    let stderr = String::from_utf8_lossy(&fallback.stderr);
+    let versions = parse_pip_versions(&stderr);
+    if versions.is_empty() {
+        return Err(AgentError::Detection {
+            agent_id: package.to_string(),
+            reason: "no versions found".to_string(),
+        });
+    }
+    Ok(versions)
+}
+
+fn parse_pip_versions(output: &str) -> Vec<String> {
+    let mut versions = Vec::new();
+    for line in output.lines() {
+        if let Some(idx) = line.find("from versions:") {
+            let rest = &line[idx + "from versions:".len()..];
+            for part in rest.split(',') {
+                let version = part
+                    .trim()
+                    .trim_matches(|c| c == ' ' || c == '"' || c == '\'');
+                if !version.is_empty() {
+                    versions.push(version.to_string());
+                }
+            }
+        }
+    }
+    versions
 }
 
 /// Detect the symlink pattern used in a skills directory.
