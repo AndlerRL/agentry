@@ -35,16 +35,37 @@ impl std::fmt::Display for PromptFormat {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InstallMethod {
-    Brew { formula: String, cask: bool },
-    Npm { package: String },
-    Cargo { crate_name: String },
-    Pip { package: String },
-    VsCodeExtension { extension_id: String },
-    JetBrainsPlugin { plugin_id: String },
-    DirectDownload { url: String, binary_name: String },
-    AppBundle { app_name: String },
+    Brew {
+        formula: String,
+        cask: bool,
+    },
+    Npm {
+        package: String,
+    },
+    Cargo {
+        crate_name: String,
+    },
+    Pip {
+        package: String,
+    },
+    VsCodeExtension {
+        extension_id: String,
+    },
+    JetBrainsPlugin {
+        plugin_id: String,
+    },
+    DirectDownload {
+        url: String,
+        binary_name: String,
+    },
+    AppBundle {
+        app_name: String,
+    },
     BuiltIn,
-    Other { description: String, install_cmd: String },
+    Other {
+        description: String,
+        install_cmd: String,
+    },
 }
 
 impl InstallMethod {
@@ -89,13 +110,22 @@ impl InstallMethod {
             InstallMethod::Npm { .. } => which_exists("npm"),
             InstallMethod::Cargo { .. } => which_exists("cargo"),
             InstallMethod::Pip { .. } => which_exists("pip3") || which_exists("pip"),
-            InstallMethod::VsCodeExtension { .. } => {
-                std::env::var("HOME")
-                    .map(|h| std::path::PathBuf::from(h).join(".vscode").join("extensions").exists())
-                    .unwrap_or(false)
-            }
-            InstallMethod::JetBrainsPlugin { .. } => cfg!(any(target_os = "macos", target_os = "linux", target_os = "windows")),
-            InstallMethod::DirectDownload { .. } | InstallMethod::BuiltIn | InstallMethod::Other { .. } => true,
+            InstallMethod::VsCodeExtension { .. } => std::env::var("HOME")
+                .map(|h| {
+                    std::path::PathBuf::from(h)
+                        .join(".vscode")
+                        .join("extensions")
+                        .exists()
+                })
+                .unwrap_or(false),
+            InstallMethod::JetBrainsPlugin { .. } => cfg!(any(
+                target_os = "macos",
+                target_os = "linux",
+                target_os = "windows"
+            )),
+            InstallMethod::DirectDownload { .. }
+            | InstallMethod::BuiltIn
+            | InstallMethod::Other { .. } => true,
         }
     }
 
@@ -185,9 +215,7 @@ impl InstallMethod {
             InstallMethod::Brew { formula, cask } if !cask => {
                 Some(format!("brew info --json=v2 {formula}"))
             }
-            InstallMethod::Npm { package } => {
-                Some(format!("npm view {package} versions --json"))
-            }
+            InstallMethod::Npm { package } => Some(format!("npm view {package} versions --json")),
             InstallMethod::Cargo { crate_name } => {
                 Some(format!("cargo search {crate_name} --limit 1"))
             }

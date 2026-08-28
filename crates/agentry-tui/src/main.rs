@@ -156,11 +156,8 @@ async fn cmd_detect() -> Result<()> {
         let version = agent.version.as_deref().unwrap_or("---");
 
         if agent.installed {
-            let detected_labels: Vec<&str> = agent
-                .detected_methods
-                .iter()
-                .map(|m| m.label())
-                .collect();
+            let detected_labels: Vec<&str> =
+                agent.detected_methods.iter().map(|m| m.label()).collect();
             if detected_labels.is_empty() {
                 println!("  {} {:<18} v{:<8}", status, agent.spec.name, version);
             } else {

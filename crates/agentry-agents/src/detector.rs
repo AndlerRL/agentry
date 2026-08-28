@@ -168,7 +168,9 @@ fn detect_cargo_crate(crate_name: &str) -> bool {
     match Command::new("cargo").args(["install", "--list"]).output() {
         Ok(output) => {
             let stdout = String::from_utf8_lossy(&output.stdout);
-            stdout.lines().any(|line| line.contains(crate_name) && !line.starts_with(' '))
+            stdout
+                .lines()
+                .any(|line| line.contains(crate_name) && !line.starts_with(' '))
         }
         Err(_) => false,
     }
@@ -206,7 +208,10 @@ fn detect_jetbrains_plugin(_plugin_id: &str) -> bool {
     // For now, check if any JetBrains config directory exists.
     let home = dirs_home();
     #[cfg(target_os = "macos")]
-    let base = home.join("Library").join("Application Support").join("JetBrains");
+    let base = home
+        .join("Library")
+        .join("Application Support")
+        .join("JetBrains");
     #[cfg(not(target_os = "macos"))]
     let base = home.join(".config").join("JetBrains");
 

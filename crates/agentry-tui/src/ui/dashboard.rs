@@ -129,7 +129,9 @@ fn draw_agents_list_enhanced(f: &mut Frame, app: &App, area: Rect) {
             let mut spans = vec![
                 Span::styled(
                     format!("{} ", status_icon),
-                    Style::default().fg(status_color).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(status_color)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     format!("{:<18}", agent.spec.name),
@@ -149,7 +151,9 @@ fn draw_agents_list_enhanced(f: &mut Frame, app: &App, area: Rect) {
                     let key = method.method_key();
                     spans.push(Span::styled(
                         format!(" {}", key),
-                        Style::default().fg(badge_color).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(badge_color)
+                            .add_modifier(Modifier::BOLD),
                     ));
                 }
             }
@@ -204,11 +208,8 @@ fn draw_agent_detail_enhanced(f: &mut Frame, app: &App, area: Rect) {
 
         // Detection summary
         if agent.installed {
-            let detected_methods: Vec<&str> = agent
-                .detected_methods
-                .iter()
-                .map(|m| m.label())
-                .collect();
+            let detected_methods: Vec<&str> =
+                agent.detected_methods.iter().map(|m| m.label()).collect();
             if detected_methods.is_empty() {
                 agent_lines.push(Line::from(vec![
                     Span::styled("  Status:   ", Style::default().fg(Color::Yellow)),
@@ -217,7 +218,10 @@ fn draw_agent_detail_enhanced(f: &mut Frame, app: &App, area: Rect) {
             } else {
                 agent_lines.push(Line::from(vec![
                     Span::styled("  Detected: ", Style::default().fg(Color::Yellow)),
-                    Span::styled(detected_methods.join(", "), Style::default().fg(Color::Green)),
+                    Span::styled(
+                        detected_methods.join(", "),
+                        Style::default().fg(Color::Green),
+                    ),
                 ]));
             }
         } else {
@@ -310,10 +314,7 @@ fn draw_agent_detail_enhanced(f: &mut Frame, app: &App, area: Rect) {
                             Color::DarkGray
                         }),
                     ),
-                    Span::styled(
-                        format!("[{}] ", check),
-                        Style::default().fg(check_color),
-                    ),
+                    Span::styled(format!("[{}] ", check), Style::default().fg(check_color)),
                     Span::styled(
                         format!("{:<20}", method.label()),
                         Style::default().fg(Color::White),
@@ -322,7 +323,10 @@ fn draw_agent_detail_enhanced(f: &mut Frame, app: &App, area: Rect) {
                 // Show install command hint
                 let hint = method.install_command(None);
                 let hint_short = truncate_to_width(&hint, detail_width.saturating_sub(28));
-                spans.push(Span::styled(hint_short, Style::default().fg(Color::DarkGray)));
+                spans.push(Span::styled(
+                    hint_short,
+                    Style::default().fg(Color::DarkGray),
+                ));
 
                 agent_lines.push(Line::from(spans));
             }
@@ -451,9 +455,7 @@ fn draw_prompts_list(f: &mut Frame, app: &App, area: Rect) {
         for (_orig_idx, prompt) in &project_prompts {
             let scope_label = match &prompt.scope {
                 agentry_core::models::PromptScope::Project { root } => {
-                    root.file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("?")
+                    root.file_name().and_then(|n| n.to_str()).unwrap_or("?")
                 }
                 _ => "",
             };
@@ -503,9 +505,7 @@ fn draw_prompt_detail(f: &mut Frame, app: &App, area: Rect) {
             .prompts
             .iter()
             .enumerate()
-            .filter(|(_, p)| {
-                matches!(p.scope, agentry_core::models::PromptScope::Project { .. })
-            })
+            .filter(|(_, p)| matches!(p.scope, agentry_core::models::PromptScope::Project { .. }))
             .collect();
 
         let mut list_row = 0;
@@ -609,7 +609,10 @@ fn draw_prompt_detail(f: &mut Frame, app: &App, area: Rect) {
 
             for line in prompt.body.lines().take(20) {
                 detail_lines.push(Line::from(Span::styled(
-                    format!(" {}", truncate_to_width(line, detail_width.saturating_sub(1))),
+                    format!(
+                        " {}",
+                        truncate_to_width(line, detail_width.saturating_sub(1))
+                    ),
                     Style::default().fg(Color::White),
                 )));
             }
@@ -699,12 +702,7 @@ fn draw_skills_list(f: &mut Frame, app: &App, area: Rect) {
         for (source, skills) in &source_groups {
             let installed_count = skills.iter().filter(|s| s.installed).count();
             items.push(ListItem::new(Line::from(Span::styled(
-                format!(
-                    " ── {} ({}/{}) ──",
-                    source,
-                    installed_count,
-                    skills.len()
-                ),
+                format!(" ── {} ({}/{}) ──", source, installed_count, skills.len()),
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
@@ -825,7 +823,11 @@ fn draw_skill_detail(f: &mut Frame, app: &App, area: Rect) {
                 Span::styled("  Source:   ", Style::default().fg(Color::Yellow)),
                 Span::styled(
                     truncate_to_width(
-                        if skill.source.is_empty() { "—" } else { &skill.source },
+                        if skill.source.is_empty() {
+                            "—"
+                        } else {
+                            &skill.source
+                        },
                         detail_width,
                     ),
                     Style::default().fg(Color::White),
@@ -907,10 +909,8 @@ fn draw_sync_list(f: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(Color::DarkGray),
         )))]
     } else {
-        let mut prompt_groups: std::collections::BTreeMap<
-            &str,
-            Vec<&crate::app::SyncResultEntry>,
-        > = std::collections::BTreeMap::new();
+        let mut prompt_groups: std::collections::BTreeMap<&str, Vec<&crate::app::SyncResultEntry>> =
+            std::collections::BTreeMap::new();
         for entry in &app.sync_results {
             prompt_groups
                 .entry(&entry.prompt_name)

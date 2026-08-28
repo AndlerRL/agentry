@@ -424,16 +424,13 @@ impl App {
                                 let _ = std::fs::create_dir_all(parent);
                             }
                             // Write an empty template
-                            let template = format!(
-                                "# {}\n\n<!-- Write your prompt content here -->\n",
-                                name
-                            );
+                            let template =
+                                format!("# {}\n\n<!-- Write your prompt content here -->\n", name);
                             if let Err(e) = std::fs::write(&prompt_path, &template) {
                                 self.error_message =
                                     Some(format!("Failed to create prompt: {}", e));
                             } else {
-                                self.status_message =
-                                    Some(format!("Created prompt: {}", name));
+                                self.status_message = Some(format!("Created prompt: {}", name));
                                 // Reload prompts
                                 self.discover_prompts();
                                 // Open it in external editor
@@ -441,10 +438,8 @@ impl App {
                                 // Reload the content
                                 if let Ok(content) = std::fs::read_to_string(&prompt_path) {
                                     // Find the new prompt and update it
-                                    if let Some(p) = self
-                                        .prompts
-                                        .iter_mut()
-                                        .find(|p| p.name == name)
+                                    if let Some(p) =
+                                        self.prompts.iter_mut().find(|p| p.name == name)
                                     {
                                         p.body = content;
                                     }
@@ -542,7 +537,8 @@ impl App {
     fn list_max(&self) -> usize {
         match self.tab_index {
             0 => self.detected_agents.len().max(1), // Agents tab
-            1 => { // Prompts tab
+            1 => {
+                // Prompts tab
                 // Prompts: global header + global prompts + project header + project prompts + new action
                 let has_global = self
                     .prompts
@@ -604,8 +600,10 @@ impl App {
                 if self.sync_results.is_empty() {
                     1 // placeholder
                 } else {
-                    let mut groups: std::collections::BTreeMap<&str, Vec<&crate::app::SyncResultEntry>> =
-                        std::collections::BTreeMap::new();
+                    let mut groups: std::collections::BTreeMap<
+                        &str,
+                        Vec<&crate::app::SyncResultEntry>,
+                    > = std::collections::BTreeMap::new();
                     for entry in &self.sync_results {
                         groups.entry(&entry.prompt_name).or_default().push(entry);
                     }
@@ -880,14 +878,10 @@ impl App {
         let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
 
         // Run the editor
-        let result = std::process::Command::new(&editor)
-            .arg(file_path)
-            .status();
+        let result = std::process::Command::new(&editor).arg(file_path).status();
 
         // Restore TUI
-        use crossterm::{
-            terminal::{enable_raw_mode, EnterAlternateScreen},
-        };
+        use crossterm::terminal::{enable_raw_mode, EnterAlternateScreen};
         let _ = execute!(std::io::stdout(), EnterAlternateScreen);
         let _ = enable_raw_mode();
 
@@ -947,18 +941,15 @@ impl App {
             }
             2 => {
                 // Skills tab - install selected skill (clone data to avoid borrow conflicts)
-                let skill_info = self.selected_skill().map(|s| {
-                    (s.name.clone(), s.installed, s.source.clone())
-                });
+                let skill_info = self
+                    .selected_skill()
+                    .map(|s| (s.name.clone(), s.installed, s.source.clone()));
                 if let Some((name, installed, source)) = skill_info {
                     if !installed && !source.is_empty() {
-                        self.skill_confirm =
-                            Some(SkillConfirmAction::Install(name.clone()));
-                        self.status_message =
-                            Some(format!("Install '{}'? (y/n)", name));
+                        self.skill_confirm = Some(SkillConfirmAction::Install(name.clone()));
+                        self.status_message = Some(format!("Install '{}'? (y/n)", name));
                     } else if installed {
-                        self.status_message =
-                            Some(format!("'{}' is already installed", name));
+                        self.status_message = Some(format!("'{}' is already installed", name));
                     }
                 }
             }
@@ -996,10 +987,7 @@ impl App {
         if self.tab_index == 1 {
             if let Some(idx) = self.selected_prompt_index() {
                 self.delete_confirm = Some(idx);
-                self.status_message = Some(format!(
-                    "Delete '{}'? (y/n)",
-                    self.prompts[idx].name
-                ));
+                self.status_message = Some(format!("Delete '{}'? (y/n)", self.prompts[idx].name));
             }
         }
     }
@@ -1073,8 +1061,7 @@ impl App {
                         if !skill.installed {
                             self.skill_confirm =
                                 Some(SkillConfirmAction::Install(skill.name.clone()));
-                            self.status_message =
-                                Some(format!("Install '{}'? (y/n)", skill.name));
+                            self.status_message = Some(format!("Install '{}'? (y/n)", skill.name));
                         } else {
                             self.status_message =
                                 Some(format!("'{}' is already installed", skill.name));
@@ -1113,19 +1100,25 @@ impl App {
                 let cmd = match method.list_versions_command() {
                     Some(c) => c,
                     None => {
-                        self.status_message = Some("Version listing not supported for this method".into());
+                        self.status_message =
+                            Some("Version listing not supported for this method".into());
                         return;
                     }
                 };
                 self.status_message = Some("Fetching versions...".into());
-                match std::process::Command::new("sh").arg("-c").arg(&cmd).output() {
+                match std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(&cmd)
+                    .output()
+                {
                     Ok(output) if output.status.success() => {
                         let stdout = String::from_utf8_lossy(&output.stdout);
                         // Parse versions depending on the method type
                         let versions: Vec<String> = match method {
                             agentry_core::models::InstallMethod::Brew { .. } => {
                                 // brew info --json=v2 returns JSON
-                                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&stdout) {
+                                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&stdout)
+                                {
                                     let v = val["versions"]["stable"].as_str().unwrap_or("unknown");
                                     vec![v.to_string()]
                                 } else {
@@ -1135,15 +1128,18 @@ impl App {
                             agentry_core::models::InstallMethod::Npm { .. } => {
                                 serde_json::from_str::<Vec<String>>(&stdout).unwrap_or_default()
                             }
-                            _ => {
-                                stdout.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect()
-                            }
+                            _ => stdout
+                                .lines()
+                                .map(|l| l.trim().to_string())
+                                .filter(|l| !l.is_empty())
+                                .collect(),
                         };
                         if versions.is_empty() {
                             self.version_list_error = Some("No versions found".into());
                         } else {
                             self.version_list = Some(versions);
-                            self.status_message = Some("Versions loaded. Select with j/k, Enter to confirm".into());
+                            self.status_message =
+                                Some("Versions loaded. Select with j/k, Enter to confirm".into());
                         }
                     }
                     Ok(_) => {
@@ -1160,13 +1156,15 @@ impl App {
     fn execute_agent_action(&mut self, action: AgentConfirmAction) {
         use crossterm::{
             execute,
-            terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+            terminal::{
+                disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+            },
         };
 
         let cmd = match &action {
-            AgentConfirmAction::Install { method, version, .. } => {
-                method.install_command(version.as_deref())
-            }
+            AgentConfirmAction::Install {
+                method, version, ..
+            } => method.install_command(version.as_deref()),
             AgentConfirmAction::Update { method, .. } => method.update_command(),
             AgentConfirmAction::Remove { method, .. } => method.remove_command(),
         };
@@ -1175,7 +1173,10 @@ impl App {
         let _ = disable_raw_mode();
         let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
 
-        let status = std::process::Command::new("sh").arg("-c").arg(&cmd).status();
+        let status = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&cmd)
+            .status();
 
         // Restore TUI
         let _ = execute!(std::io::stdout(), EnterAlternateScreen);
@@ -1238,8 +1239,7 @@ impl App {
                         if skill.installed {
                             self.skill_confirm =
                                 Some(SkillConfirmAction::Update(skill.name.clone()));
-                            self.status_message =
-                                Some(format!("Update '{}'? (y/n)", skill.name));
+                            self.status_message = Some(format!("Update '{}'? (y/n)", skill.name));
                         } else {
                             self.status_message =
                                 Some(format!("'{}' is not installed", skill.name));
@@ -1285,8 +1285,7 @@ impl App {
                         if skill.installed {
                             self.skill_confirm =
                                 Some(SkillConfirmAction::Remove(skill.name.clone()));
-                            self.status_message =
-                                Some(format!("Remove '{}'? (y/n)", skill.name));
+                            self.status_message = Some(format!("Remove '{}'? (y/n)", skill.name));
                         } else {
                             self.status_message =
                                 Some(format!("'{}' is not installed", skill.name));
@@ -1426,10 +1425,7 @@ impl App {
         if self.tab_index == 3 {
             if !self.acp_capabilities.is_empty() {
                 let task = if let Some(entry) = self.selected_sync_entry() {
-                    format!(
-                        "Sync {} to {}",
-                        entry.prompt_name, entry.agent_id
-                    )
+                    format!("Sync {} to {}", entry.prompt_name, entry.agent_id)
                 } else {
                     "Sync all prompts".to_string()
                 };
