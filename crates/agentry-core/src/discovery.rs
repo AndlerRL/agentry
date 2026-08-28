@@ -102,6 +102,8 @@ pub fn discover_prompts(home_dir: &Path, project_dirs: &[PathBuf]) -> Vec<Unifie
         }
     }
 
+    let mut seen = std::collections::HashSet::new();
+    prompts.retain(|p| seen.insert((p.name.clone(), p.scope.clone())));
     prompts
 }
 
@@ -189,6 +191,81 @@ pub fn delete_prompt(home_dir: &Path, name: &str) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct TempDir {
+        path: PathBuf,
+    }
+
+    impl TempDir {
+        fn new(prefix: &str) -> Self {
+            let path = std::env::temp_dir().join(format!("{}_{}", prefix, std::process::id()));
+            std::fs::create_dir_all(&path).expect("failed to create temp dir");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn test_discover_prompts_dedups_synced_copies() {
+        let tmp = TempDir::new("agentry_test_discovery_dedup");
+        let canonical_dir = tmp.path().join(".agents").join("prompts");
+        let gemini_dir = tmp.path().join(".gemini");
+        std::fs::create_dir_all(&canonical_dir).unwrap();
+        std::fs::create_dir_all(&gemini_dir).unwrap();
+
+        let canonical_path = canonical_dir.join("GEMINI.md");
+        let synced_path = gemini_dir.join("GEMINI.md");
+        std::fs::write(&canonical_path, "# GEMINI\n\nCanonical prompt").unwrap();
+        std::fs::write(&synced_path, "# GEMINI\n\nSynced copy").unwrap();
+
+        let prompts = discover_prompts(tmp.path(), &[]);
+        let gemini: Vec<&UnifiedPrompt> = prompts.iter().filter(|p| p.name == "GEMINI").collect();
+
+        assert_eq!(gemini.len(), 1);
+        assert_eq!(
+            gemini[0].source_path.as_deref(),
+            Some(canonical_path.as_path())
+        );
+    }
+
+    #[test]
+    fn test_discover_prompts_keeps_same_name_across_scopes() {
+        let tmp = TempDir::new("agentry_test_discovery_scopes");
+        let canonical_dir = tmp.path().join(".agents").join("prompts");
+        let project_dir = tmp.path().join("Development").join("some-project");
+        std::fs::create_dir_all(&canonical_dir).unwrap();
+        std::fs::create_dir_all(&project_dir).unwrap();
+
+        let canonical_path = canonical_dir.join("GEMINI.md");
+        let project_path = project_dir.join("GEMINI.md");
+        std::fs::write(&canonical_path, "# GEMINI\n\nCanonical prompt").unwrap();
+        std::fs::write(&project_path, "# GEMINI\n\nProject prompt").unwrap();
+
+        let prompts = discover_prompts(tmp.path(), &[tmp.path().join("Development")]);
+        let gemini: Vec<&UnifiedPrompt> = prompts.iter().filter(|p| p.name == "GEMINI").collect();
+
+        assert_eq!(gemini.len(), 2);
+        assert!(gemini.iter().any(|p| {
+            p.scope == PromptScope::Global
+                && p.source_path.as_deref() == Some(canonical_path.as_path())
+        }));
+        assert!(gemini.iter().any(|p| {
+            p.scope
+                == PromptScope::Project {
+                    root: project_dir.clone(),
+                }
+                && p.source_path.as_deref() == Some(project_path.as_path())
+        }));
+    }
 
     #[test]
     fn test_detect_format_plain() {
