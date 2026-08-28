@@ -18,6 +18,7 @@ agentry-sync = { workspace = true }
 agentry-skills = { workspace = true }
 agentry-openclaw = { workspace = true }
 agentry-acp = { workspace = true }
+agentry-audit = { path = "../agentry-audit" }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
 clap = { workspace = true }

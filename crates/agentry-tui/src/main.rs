@@ -46,6 +46,18 @@ enum Commands {
         #[command(subcommand)]
         action: Option<OpenclawCommands>,
     },
+    /// Audit agent health and configuration
+    Audit {
+        /// Filter audit to a single agent id (e.g. claude-code)
+        #[arg(long)]
+        agent: Option<String>,
+        /// Output the full AuditReport as JSON
+        #[arg(long)]
+        json: bool,
+        /// Only show findings at or above this severity (critical|warning|info|suggestion)
+        #[arg(long)]
+        severity: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -111,6 +123,11 @@ async fn main() -> Result<()> {
         Some(Commands::Skills { action }) => cmd_skills(action).await,
         Some(Commands::Prompts { action }) => cmd_prompts(action).await,
         Some(Commands::Openclaw { action }) => cmd_openclaw(action).await,
+        Some(Commands::Audit {
+            agent,
+            json,
+            severity,
+        }) => cmd_audit(agent, json, severity).await,
         None => run_tui().await,
     }
 }
@@ -438,4 +455,254 @@ async fn cmd_openclaw(action: Option<OpenclawCommands>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn audit_version_lookup() -> impl Fn(&str, &str) -> Option<Vec<String>> {
+    use agentry_agents::detector::{
+        list_brew_versions, list_cargo_versions, list_npm_versions, list_pip_versions,
+    };
+    use agentry_core::models::InstallMethod;
+
+    move |agent_id: &str, method_key: &str| -> Option<Vec<String>> {
+        let spec = agentry_agents::all_agent_specs()
+            .into_iter()
+            .find(|spec| spec.id == agent_id)?;
+        let method = spec
+            .install_methods
+            .iter()
+            .find(|m| m.method_key() == method_key)?;
+        match method {
+            InstallMethod::Brew { formula, .. } => list_brew_versions(formula).ok(),
+            InstallMethod::Npm { package } => list_npm_versions(package).ok(),
+            InstallMethod::Cargo { crate_name } => list_cargo_versions(crate_name).ok(),
+            InstallMethod::Pip { package } => list_pip_versions(package).ok(),
+            _ => None,
+        }
+    }
+}
+
+fn audit_severity_filter(raw: &str) -> Option<agentry_audit::report::Severity> {
+    match raw.to_ascii_lowercase().as_str() {
+        "critical" => Some(agentry_audit::report::Severity::Critical),
+        "warning" => Some(agentry_audit::report::Severity::Warning),
+        "info" => Some(agentry_audit::report::Severity::Info),
+        "suggestion" => Some(agentry_audit::report::Severity::Suggestion),
+        _ => None,
+    }
+}
+
+fn audit_finding_lines(finding: &agentry_audit::report::AuditFinding) -> Vec<String> {
+    let mut lines = vec![format!("    [{}] {}", finding.check_id, finding.message)];
+    lines.push(format!("      remediation: {}", finding.remediation));
+    if finding.auto_fixable {
+        lines.push("      auto-fixable".to_string());
+    }
+    lines
+}
+
+fn audit_print_findings(
+    findings: &[agentry_audit::report::AuditFinding],
+    min_severity: Option<agentry_audit::report::Severity>,
+) {
+    use agentry_audit::report::Severity;
+
+    let mut by_severity: std::collections::BTreeMap<
+        Severity,
+        Vec<&agentry_audit::report::AuditFinding>,
+    > = std::collections::BTreeMap::new();
+    for finding in findings {
+        if let Some(min) = min_severity {
+            if finding.severity > min {
+                continue;
+            }
+        }
+        by_severity
+            .entry(finding.severity)
+            .or_default()
+            .push(finding);
+    }
+    for (severity, group) in &by_severity {
+        let label = match severity {
+            Severity::Critical => "Critical",
+            Severity::Warning => "Warning",
+            Severity::Info => "Info",
+            Severity::Suggestion => "Suggestion",
+        };
+        println!("  {}:", label);
+        for finding in group {
+            for line in audit_finding_lines(finding) {
+                println!("{}", line);
+            }
+        }
+    }
+}
+
+async fn cmd_audit(agent: Option<String>, json: bool, severity: Option<String>) -> Result<()> {
+    use agentry_audit::engine::{build_context, run_audit};
+    use agentry_audit::report::Severity;
+
+    let min_severity = match severity.as_deref() {
+        Some(raw) => match audit_severity_filter(raw) {
+            Some(parsed) => Some(parsed),
+            None => {
+                eprintln!(
+                    "Invalid --severity '{}'. Use critical|warning|info|suggestion",
+                    raw
+                );
+                std::process::exit(2);
+            }
+        },
+        None => None,
+    };
+
+    let home = resolve_home();
+    let project_dirs = vec![home.join("Development")];
+    let prompts = agentry_core::discovery::discover_prompts(&home, &project_dirs);
+    let mut ctx = build_context(&home, prompts);
+    ctx.version_lookup = Some(Box::new(audit_version_lookup()));
+    let detected = agentry_agents::detect_all_agents().await;
+    for agent in &mut ctx.agents {
+        if let Some(found) = detected.iter().find(|d| d.spec.id == agent.spec.id) {
+            agent.version = found.version.clone();
+            agent.detected_methods = found.detected_methods.clone();
+            agent.installed = found.installed;
+        }
+    }
+
+    let report = run_audit(&ctx);
+
+    let mut report = report;
+    if let Some(agent_id) = &agent {
+        if !report.agents.iter().any(|a| &a.agent_id == agent_id) {
+            eprintln!("Unknown agent id '{}'", agent_id);
+            std::process::exit(2);
+        }
+        report.agents.retain(|a| &a.agent_id == agent_id);
+        report.global_findings.clear();
+        report.summary = agentry_audit::report::AuditSummary {
+            total_findings: report.agents[0].findings.len(),
+            by_severity: report.agents[0].findings.iter().fold(
+                std::collections::BTreeMap::new(),
+                |mut acc, f| {
+                    *acc.entry(f.severity).or_insert(0) += 1;
+                    acc
+                },
+            ),
+            by_category: report.agents[0].findings.iter().fold(
+                std::collections::BTreeMap::new(),
+                |mut acc, f| {
+                    *acc.entry(f.category).or_insert(0) += 1;
+                    acc
+                },
+            ),
+            auto_fixable_count: report.agents[0]
+                .findings
+                .iter()
+                .filter(|f| f.auto_fixable)
+                .count(),
+            healthy_agents: usize::from(
+                report.agents[0].grade == agentry_audit::report::HealthGrade::Healthy,
+            ),
+            degraded_agents: usize::from(
+                report.agents[0].grade == agentry_audit::report::HealthGrade::Degraded,
+            ),
+        };
+    }
+
+    let has_critical = report
+        .agents
+        .iter()
+        .any(|a| a.findings.iter().any(|f| f.severity == Severity::Critical))
+        || report
+            .global_findings
+            .iter()
+            .any(|f| f.severity == Severity::Critical);
+
+    if json {
+        match serde_json::to_string_pretty(&report) {
+            Ok(output) => println!("{}", output),
+            Err(err) => {
+                eprintln!("Failed to serialize audit report: {}", err);
+                std::process::exit(2);
+            }
+        }
+    } else {
+        println!(
+            "Agent Audit — {}",
+            report.generated_at.format("%Y-%m-%d %H:%M UTC")
+        );
+        println!();
+        for agent_audit in &report.agents {
+            println!(
+                "  {} — {}/100 ({:?})",
+                agent_audit.detected.spec.name, agent_audit.health_score, agent_audit.grade
+            );
+            audit_print_findings(&agent_audit.findings, min_severity);
+            println!();
+        }
+        if !report.global_findings.is_empty() {
+            println!("Global:");
+            audit_print_findings(&report.global_findings, min_severity);
+            println!();
+        }
+        let (displayed, auto_fixable) = match min_severity {
+            Some(min) => {
+                let findings = report
+                    .agents
+                    .iter()
+                    .flat_map(|a| a.findings.iter())
+                    .chain(report.global_findings.iter())
+                    .filter(|f| f.severity <= min);
+                let displayed = findings.clone().count();
+                (displayed, findings.filter(|f| f.auto_fixable).count())
+            }
+            None => (
+                report.summary.total_findings,
+                report.summary.auto_fixable_count,
+            ),
+        };
+        println!(
+            "Summary: {} finding(s), {} auto-fixable",
+            displayed, auto_fixable
+        );
+    }
+
+    if has_critical {
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audit_severity_filter_parses_all_levels() {
+        assert_eq!(
+            audit_severity_filter("critical"),
+            Some(agentry_audit::report::Severity::Critical)
+        );
+        assert_eq!(
+            audit_severity_filter("WARNING"),
+            Some(agentry_audit::report::Severity::Warning)
+        );
+        assert_eq!(
+            audit_severity_filter("info"),
+            Some(agentry_audit::report::Severity::Info)
+        );
+        assert_eq!(
+            audit_severity_filter("suggestion"),
+            Some(agentry_audit::report::Severity::Suggestion)
+        );
+        assert_eq!(audit_severity_filter("bogus"), None);
+    }
+
+    #[test]
+    fn audit_version_lookup_resolves_known_and_rejects_unknown() {
+        let lookup = audit_version_lookup();
+        assert!(lookup("nonexistent-id", "npm").is_none());
+        assert!(lookup("claude-code", "not-a-method").is_none());
+    }
 }
