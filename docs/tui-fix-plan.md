@@ -1,7 +1,7 @@
 # TUI Fix Plan — Sequential Implementation
 
 **Date:** 2026-05-14  
-**Status:** Testing Complete, Ready to Fix  
+**Status:** All Options Complete (C, B, A, D)  
 **Order:** C → B → A → D
 
 ---
@@ -10,22 +10,22 @@
 
 ### Test Results
 
-| Tab | Status | Issues Found |
-|-----|--------|--------------|
-| **Agents (Tab 1)** | ✅ Working | Minor: Long paths could overflow |
-| **Prompts (Tab 2)** | ⚠️ Offset bug | Selection includes headers in count |
-| **Skills (Tab 3)** | ⚠️ Offset bug | Source headers break index mapping |
-| **Sync (Tab 4)** | ⚠️ Offset bug | Prompt-name headers break index mapping |
-| **OpenClaw (Tab 5)** | ✅ Working | No major issues |
+| Tab                  | Status        | Issues Found                            |
+| -------------------- | ------------- | --------------------------------------- |
+| **Agents (Tab 1)**   | ✅ Working    | Minor: Long paths could overflow        |
+| **Prompts (Tab 2)**  | ⚠️ Offset bug | Selection includes headers in count     |
+| **Skills (Tab 3)**   | ⚠️ Offset bug | Source headers break index mapping      |
+| **Sync (Tab 4)**     | ⚠️ Offset bug | Prompt-name headers break index mapping |
+| **OpenClaw (Tab 5)** | ✅ Working    | No major issues                         |
 
 ### CLI Commands Tested
 
-| Command | Status | Notes |
-|---------|--------|-------|
-| `agentry detect` | ✅ | Shows 6/11 agents correctly |
-| `agentry sync --all --dry-run` | ⏳ | Needs testing |
-| `agentry skills list` | ⏳ | Needs testing |
-| `agentry prompts list` | ⏳ | Needs testing |
+| Command                        | Status | Notes                       |
+| ------------------------------ | ------ | --------------------------- |
+| `agentry detect`               | ✅     | Shows 6/11 agents correctly |
+| `agentry sync --all --dry-run` | ✅     | Tested, works               |
+| `agentry skills list`          | ✅     | Tested, works               |
+| `agentry prompts list`         | ✅     | Tested, works — duplicate GEMINI entry bug found and fixed via dedup in discovery.rs (name+scope first-wins) |
 
 ---
 
@@ -35,22 +35,25 @@
 
 ### Current Usage
 
-| Function | Lines Using Truncation |
-|----------|----------------------|
+| Function                       | Lines Using Truncation                  |
+| ------------------------------ | --------------------------------------- |
 | `draw_agent_detail_enhanced()` | 4 locations (lines 192, 260, 324, etc.) |
-| `draw_prompt_detail()` | 5 locations (lines 567, 581, 598, 612) |
-| `draw_skill_detail()` | 3 locations (lines 827, 840, 857) |
-| `draw_sync_detail()` | 2 locations (lines 1047, 1251) |
+| `draw_prompt_detail()`         | 5 locations (lines 567, 581, 598, 612)  |
+| `draw_skill_detail()`          | 3 locations (lines 827, 840, 857)       |
+| `draw_sync_detail()`           | 2 locations (lines 1047, 1251)          |
 
 **Status:** ✅ **No action needed** — Already implemented correctly!
 
 ---
 
-## Option A: List Selection Offset Bugs 🔧 TO FIX
+## Option A: List Selection Offset Bugs ✅ COMPLETE
+
+**Status: Implemented** — all selection helpers exist in `app.rs` and all key handlers use them. The root-cause explanation and fix strategy below document what was done.
 
 ### Root Cause
 
 All grouped lists have this structure:
+
 ```
 [Header Row 0]    ← list_selected = 0 (header, not data!)
 [Data Item 0]     ← list_selected = 1 (should map to data[0])
@@ -74,7 +77,7 @@ But code does: `data[list_selected]` which is wrong!
 ```rust
 pub enum TabSelection {
     Agents { agent_idx: usize },
-    Prompts { 
+    Prompts {
         group: PromptGroup,  // Global or Project(root)
         item_idx: usize,     // Index within group
     },
@@ -98,36 +101,45 @@ impl App {
         // Walk through grouped structure, skip headers
         // Return prompt at correct index
     }
-    
+
     fn selected_skill(&self) -> Option<&AvailableSkill> {
         // Same for skills
     }
-    
+
     fn selected_sync_entry(&self) -> Option<&SyncResultEntry> {
         // Same for sync
     }
 }
 ```
 
-### Files to Modify
+### Files Modified
 
-| File | Changes |
-|------|---------|
-| `app.rs` | Add selection helper methods |
-| `dashboard.rs` | Use helpers instead of direct indexing |
-| `app.rs` (key handlers) | Update to use helpers |
+| File                    | Changes                                |
+| ----------------------- | -------------------------------------- |
+| `app.rs`                | Selection helper methods added         |
+| `dashboard.rs`          | Uses helpers instead of direct indexing |
+| `app.rs` (key handlers) | Updated to use helpers                 |
+
+### What Was Implemented
+
+- `selected_prompt_index()` (app.rs:637), `selected_skill()` (app.rs:700), `selected_skill_index()` (app.rs:739), `selected_sync_entry()` (app.rs:776), `selected_workspace_index()` (app.rs:808) — all walk the grouped structure, skipping headers
+- Dashboard renderers build the same grouped structure the helpers assume
+- All key handlers (`on_enter`, `on_delete`, `on_edit`, `on_insert`, `on_update`, `on_remove`, `on_github`, `on_workflow`) use the helpers, not raw indexing
+- Remaining raw `[list_selected]` indexing is Agents-tab only (flat list, no headers — correct)
 
 ---
 
-## Option D: ASCII Art Intro 🔧 TO ADD
+## Option D: ASCII Art Intro ✅ COMPLETE
+
+**Status: Implemented** — the full ASCII art from README.md lives in `crates/agentry-tui/src/ui/intro.rs` as the `ASCII_ART` const (23 lines, 92 chars wide), rendered by `draw_intro()` with animation progress.
 
 ### Current State
 
-ASCII art exists in README.md but NOT in the TUI intro screen.
+ASCII art from README.md is now rendered in the TUI intro screen via `draw_intro()` in `ui/intro.rs`.
 
 ### Implementation
 
-Add to `app.rs` intro rendering:
+Implemented in `ui/intro.rs` (original plan sketch):
 
 ```rust
 fn draw_intro(&self, f: &mut Frame) {
@@ -138,7 +150,7 @@ fn draw_intro(&self, f: &mut Frame) {
         // ... (full ASCII art from README)
         "███████████████████████████████████████████████████████████████",
     ];
-    
+
     // Render centered with animation progress
 }
 ```
@@ -147,13 +159,13 @@ fn draw_intro(&self, f: &mut Frame) {
 
 ## Implementation Order
 
-### Phase 1: Fix List Selection (Option A) — HIGH PRIORITY
+### Phase 1: Fix List Selection (Option A) ✅ DONE
 
 **Files:** `app.rs`, `dashboard.rs`  
 **Estimated:** 2-3 hours  
 **Impact:** Critical — fixes broken navigation
 
-### Phase 2: Add ASCII Art Intro (Option D) — MEDIUM PRIORITY
+### Phase 2: Add ASCII Art Intro (Option D) ✅ DONE
 
 **Files:** `app.rs` (intro rendering)  
 **Estimated:** 30 minutes  
@@ -182,9 +194,9 @@ fn draw_intro(&self, f: &mut Frame) {
 
 4. **Intro Screen:**
    - Launch `agentry` (no args)
-   - Verify ASCII art displays
+   - Verify ASCII art displays ✅ (verified — art renders from `ui/intro.rs` `ASCII_ART`)
    - Verify animation progress bar
 
 ---
 
-**Ready to start Phase 1 (Option A — List Selection Fixes).**
+**All phases complete (C, B, A, D). Remaining work: regression testing per the checklist above.**
