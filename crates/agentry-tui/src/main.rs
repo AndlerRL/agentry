@@ -57,6 +57,12 @@ enum Commands {
         /// Only show findings at or above this severity (critical|warning|info|suggestion)
         #[arg(long)]
         severity: Option<String>,
+        /// Interactively apply auto-fixes to fixable findings
+        #[arg(long)]
+        fix: bool,
+        /// Apply all auto-fixes without confirmation (requires --fix)
+        #[arg(long, requires = "fix")]
+        yes: bool,
     },
 }
 
@@ -127,7 +133,9 @@ async fn main() -> Result<()> {
             agent,
             json,
             severity,
-        }) => cmd_audit(agent, json, severity).await,
+            fix,
+            yes,
+        }) => cmd_audit(agent, json, severity, fix, yes).await,
         None => run_tui().await,
     }
 }
@@ -216,7 +224,7 @@ async fn cmd_sync(prompt_name: Option<String>, all: bool, dry_run: bool) -> Resu
     use agentry_sync::planner::plan_sync;
 
     let home = resolve_home();
-    let project_dirs = vec![home.join("Development")];
+    let project_dirs = vec![home.join(agentry_core::models::DEFAULT_PROJECT_DIR)];
 
     let agents = agentry_agents::detect_all_agents().await;
     let prompts = discover_prompts(&home, &project_dirs);
@@ -374,7 +382,7 @@ async fn cmd_prompts(action: Option<PromptsCommands>) -> Result<()> {
     use agentry_core::discovery::discover_prompts;
 
     let home = resolve_home();
-    let project_dirs = vec![home.join("Development")];
+    let project_dirs = vec![home.join(agentry_core::models::DEFAULT_PROJECT_DIR)];
 
     match action {
         Some(PromptsCommands::List) => {
@@ -537,9 +545,52 @@ fn audit_print_findings(
     }
 }
 
-async fn cmd_audit(agent: Option<String>, json: bool, severity: Option<String>) -> Result<()> {
+fn count_findings(report: &agentry_audit::report::AuditReport) -> usize {
+    report
+        .agents
+        .iter()
+        .map(|a| a.findings.len())
+        .sum::<usize>()
+        + report.global_findings.len()
+}
+
+fn fix_summary_line(applied: usize, attempted: usize, after: usize, before: usize) -> String {
+    format!("{applied} of {attempted} fixes applied; {after} findings remain (was {before})")
+}
+
+async fn run_audit_with_detection(
+    home: &std::path::Path,
+    project_dirs: Vec<std::path::PathBuf>,
+) -> agentry_audit::report::AuditReport {
     use agentry_audit::engine::{build_context, run_audit};
+
+    let prompts = agentry_core::discovery::discover_prompts(home, &project_dirs);
+    let mut ctx = build_context(home, prompts);
+    ctx.version_lookup = Some(Box::new(audit_version_lookup()));
+    let detected = agentry_agents::detect_all_agents().await;
+    for agent in &mut ctx.agents {
+        if let Some(found) = detected.iter().find(|d| d.spec.id == agent.spec.id) {
+            agent.version = found.version.clone();
+            agent.detected_methods = found.detected_methods.clone();
+            agent.installed = found.installed;
+        }
+    }
+    run_audit(&ctx)
+}
+
+async fn cmd_audit(
+    agent: Option<String>,
+    json: bool,
+    severity: Option<String>,
+    fix: bool,
+    yes: bool,
+) -> Result<()> {
     use agentry_audit::report::Severity;
+
+    if fix && json {
+        eprintln!("--fix and --json are mutually exclusive");
+        std::process::exit(2);
+    }
 
     let min_severity = match severity.as_deref() {
         Some(raw) => match audit_severity_filter(raw) {
@@ -556,22 +607,19 @@ async fn cmd_audit(agent: Option<String>, json: bool, severity: Option<String>) 
     };
 
     let home = resolve_home();
-    let project_dirs = vec![home.join("Development")];
-    let prompts = agentry_core::discovery::discover_prompts(&home, &project_dirs);
-    let mut ctx = build_context(&home, prompts);
-    ctx.version_lookup = Some(Box::new(audit_version_lookup()));
-    let detected = agentry_agents::detect_all_agents().await;
-    for agent in &mut ctx.agents {
-        if let Some(found) = detected.iter().find(|d| d.spec.id == agent.spec.id) {
-            agent.version = found.version.clone();
-            agent.detected_methods = found.detected_methods.clone();
-            agent.installed = found.installed;
+    let project_dirs = vec![home.join(agentry_core::models::DEFAULT_PROJECT_DIR)];
+
+    let mut report = run_audit_with_detection(&home, project_dirs.clone()).await;
+
+    let history = match agentry_audit::history::load_history(&home) {
+        Ok(history) => history,
+        Err(err) => {
+            eprintln!("warning: failed to load audit history: {}", err);
+            Vec::new()
         }
-    }
+    };
+    agentry_audit::history::apply_feedback(&mut report, &history);
 
-    let report = run_audit(&ctx);
-
-    let mut report = report;
     if let Some(agent_id) = &agent {
         if !report.agents.iter().any(|a| &a.agent_id == agent_id) {
             eprintln!("Unknown agent id '{}'", agent_id);
@@ -609,14 +657,67 @@ async fn cmd_audit(agent: Option<String>, json: bool, severity: Option<String>) 
         };
     }
 
-    let has_critical = report
-        .agents
-        .iter()
-        .any(|a| a.findings.iter().any(|f| f.severity == Severity::Critical))
-        || report
-            .global_findings
+    let has_critical = |report: &agentry_audit::report::AuditReport| {
+        report
+            .agents
             .iter()
-            .any(|f| f.severity == Severity::Critical);
+            .any(|a| a.findings.iter().any(|f| f.severity == Severity::Critical))
+            || report
+                .global_findings
+                .iter()
+                .any(|f| f.severity == Severity::Critical)
+    };
+
+    if fix {
+        let findings = agentry_audit::fix::fixable_findings(&report);
+        if findings.is_empty() {
+            println!("No auto-fixable findings.");
+            if has_critical(&report) {
+                std::process::exit(1);
+            }
+            return Ok(());
+        }
+        let before_count = report.summary.total_findings;
+        let outcomes = agentry_audit::fix::apply_fixes(&findings, &home, yes);
+        for outcome in &outcomes {
+            let icon = if outcome.success {
+                "✓"
+            } else if outcome.message == "skipped by user" {
+                "○"
+            } else {
+                "✗"
+            };
+            println!("{} {} — {}", icon, outcome.check_id, outcome.message);
+        }
+        let succeeded_keys: Vec<(String, Option<String>)> = outcomes
+            .iter()
+            .filter(|o| o.success)
+            .map(|o| (o.check_id.clone(), o.agent_id.clone()))
+            .collect();
+
+        let mut after_report = run_audit_with_detection(&home, project_dirs).await;
+        agentry_audit::history::apply_feedback(&mut after_report, &history);
+        if let Some(agent_id) = &agent {
+            after_report.agents.retain(|a| &a.agent_id == agent_id);
+            after_report.global_findings.clear();
+        }
+        let applied = succeeded_keys.len();
+        let attempted = outcomes.len();
+        if let Err(err) = agentry_audit::history::append_history(&home, &report, &succeeded_keys) {
+            eprintln!("warning: failed to append audit history: {}", err);
+        }
+
+        let after_count = count_findings(&after_report);
+        println!(
+            "{}",
+            fix_summary_line(applied, attempted, after_count, before_count)
+        );
+
+        if has_critical(&after_report) {
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
 
     if json {
         match serde_json::to_string_pretty(&report) {
@@ -667,7 +768,11 @@ async fn cmd_audit(agent: Option<String>, json: bool, severity: Option<String>) 
         );
     }
 
-    if has_critical {
+    if let Err(err) = agentry_audit::history::append_history(&home, &report, &[]) {
+        eprintln!("warning: failed to append audit history: {}", err);
+    }
+
+    if has_critical(&report) {
         std::process::exit(1);
     }
 
@@ -704,5 +809,17 @@ mod tests {
         let lookup = audit_version_lookup();
         assert!(lookup("nonexistent-id", "npm").is_none());
         assert!(lookup("claude-code", "not-a-method").is_none());
+    }
+
+    #[test]
+    fn fix_summary_line_formats_counts() {
+        assert_eq!(
+            fix_summary_line(3, 5, 7, 12),
+            "3 of 5 fixes applied; 7 findings remain (was 12)"
+        );
+        assert_eq!(
+            fix_summary_line(0, 0, 0, 0),
+            "0 of 0 fixes applied; 0 findings remain (was 0)"
+        );
     }
 }

@@ -241,7 +241,7 @@ The "learning" rules are simple and deterministic (no ML):
 
 - A check that fires on the same agent across ≥3 consecutive runs is flagged `recurring` in the report and its findings are promoted one severity level (Warning → Critical).
 - A check that has not fired in the last 10 runs on any agent is demoted to `Suggestion`.
-- A check that fires on ≥80% of machines (across `machine_id`s in history) is a candidate for a new default check — surfaced as a `Suggestion`-level finding `audit.new_check_candidate` with the check_id, so the human (or a future agentic pass) can promote it into the catalog.
+- A check that fires on ≥80% of machines (across `machine_id`s in history) is a candidate for a new default check — surfaced as a `Suggestion`-level finding `audit.new_check_candidate` with the check_id, so the human (or a future agentic pass) can promote it into the catalog. Note: the implementation measures run-frequency (a check firing on ≥80% of runs) rather than machine-fraction — more conservative, with single-machine semantics.
 
 This gives the "self-evolving" property through data, not through an LLM inside the audit engine. The engine stays deterministic and testable; the history file is the interface any future agentic layer can consume.
 
