@@ -1,10 +1,9 @@
-use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeMap;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use agentry_agents::all_agent_specs;
 use agentry_core::models::{AgentSpec, DetectedAgent, UnifiedPrompt};
+use sha1::{Digest, Sha1};
 
 use crate::checks;
 use crate::report::{AgentAudit, AuditFinding, AuditReport, AuditSummary, HealthGrade, Severity};
@@ -189,14 +188,15 @@ fn build_summary(findings: &[AuditFinding], agents: &[AgentAudit]) -> AuditSumma
 pub fn machine_id() -> String {
     let hostname = std::env::var("HOSTNAME")
         .or_else(|_| std::env::var("HOST"))
-        .unwrap_or_default();
-    let mut hasher = DefaultHasher::new();
-    if !hostname.is_empty() {
-        hostname.hash(&mut hasher);
-    } else {
-        dirs_home().hash(&mut hasher);
-    }
-    format!("{:016x}", hasher.finish())
+        .ok()
+        .filter(|value| !value.is_empty());
+    let source: Vec<u8> = match hostname {
+        Some(name) => name.into_bytes(),
+        None => dirs_home().into_os_string().into_encoded_bytes(),
+    };
+    let mut hasher = Sha1::new();
+    hasher.update(&source);
+    format!("{:x}", hasher.finalize())
 }
 
 fn dirs_home() -> PathBuf {
@@ -407,7 +407,9 @@ mod tests {
 
     #[test]
     fn machine_id_is_stable_across_calls() {
-        assert!(!machine_id().is_empty());
-        assert_eq!(machine_id(), machine_id());
+        let id = machine_id();
+        assert!(id.len() >= 16);
+        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(machine_id(), id);
     }
 }

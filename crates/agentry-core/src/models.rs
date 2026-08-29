@@ -3,6 +3,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+pub const DEFAULT_PROJECT_DIR: &str = "Development";
+
 /// The format a prompt file uses on disk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -443,7 +445,7 @@ pub struct AppConfig {
 }
 
 fn default_project_dirs() -> Vec<PathBuf> {
-    vec![PathBuf::from("~/Development")]
+    vec![PathBuf::from(format!("~/{DEFAULT_PROJECT_DIR}"))]
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
