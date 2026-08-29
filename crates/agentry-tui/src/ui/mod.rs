@@ -13,15 +13,17 @@ pub enum Tab {
     Skills,
     Sync,
     OpenClaw,
+    Audit,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 5] = [
+    pub const ALL: [Tab; 6] = [
         Tab::Agents,
         Tab::Prompts,
         Tab::Skills,
         Tab::Sync,
         Tab::OpenClaw,
+        Tab::Audit,
     ];
 
     pub fn _index(self) -> usize {
@@ -31,6 +33,7 @@ impl Tab {
             Tab::Skills => 2,
             Tab::Sync => 3,
             Tab::OpenClaw => 4,
+            Tab::Audit => 5,
         }
     }
 
@@ -45,6 +48,7 @@ impl Tab {
             Tab::Skills => "Skills",
             Tab::Sync => "Sync",
             Tab::OpenClaw => "OpenClaw",
+            Tab::Audit => "Audit",
         }
     }
 }

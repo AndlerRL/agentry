@@ -79,6 +79,8 @@ pub struct App {
     pub version_list: Option<Vec<String>>,
     /// Error fetching versions.
     pub version_list_error: Option<String>,
+    pub audit_report: Option<agentry_audit::report::AuditReport>,
+    pub audit_filter: Option<agentry_audit::report::Severity>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,6 +167,8 @@ impl App {
             version_input: None,
             version_list: None,
             version_list_error: None,
+            audit_report: None,
+            audit_filter: None,
         }
     }
 
@@ -480,6 +484,7 @@ impl App {
             KeyCode::Char('3') => self.tab_index = 2,
             KeyCode::Char('4') => self.tab_index = 3,
             KeyCode::Char('5') => self.tab_index = 4,
+            KeyCode::Char('6') => self.tab_index = 5,
             // Navigation
             KeyCode::Char('j') | KeyCode::Down => self.list_next(),
             KeyCode::Char('k') | KeyCode::Up => self.list_prev(),
@@ -491,7 +496,13 @@ impl App {
             KeyCode::Char('e') => self.on_edit(),
             KeyCode::Char('i') => self.on_insert(),
             KeyCode::Char('u') => self.on_update(),
-            KeyCode::Char('r') => self.on_remove(),
+            KeyCode::Char('r') => {
+                if self.tab_index == 5 {
+                    self.on_run_audit();
+                } else {
+                    self.on_remove();
+                }
+            }
             KeyCode::Char('g') => self.on_github(),
             KeyCode::Char('c') => self.on_create_workspace(),
             KeyCode::Char('a') => self.on_add_agent(),
@@ -499,20 +510,21 @@ impl App {
             KeyCode::Right => self.method_next(),
             KeyCode::Char('v') => self.on_list_versions(),
             KeyCode::Char('w') => self.on_workflow(),
+            KeyCode::Char('f') => self.on_cycle_audit_filter(),
             _ => {}
         }
         Ok(())
     }
 
     fn next_tab(&mut self) {
-        self.tab_index = (self.tab_index + 1) % 5;
+        self.tab_index = (self.tab_index + 1) % 6;
         self.list_selected = 0;
         self.method_selected = 0;
     }
 
     fn prev_tab(&mut self) {
         self.tab_index = if self.tab_index == 0 {
-            4
+            5
         } else {
             self.tab_index - 1
         };
@@ -626,6 +638,21 @@ impl App {
                 } else {
                     1
                 }
+            }
+            5 => {
+                let report = match self.audit_report.as_ref() {
+                    Some(r) => r,
+                    None => return 0,
+                };
+                let mut count = 0;
+                for findings in self.audit_groups(report).values() {
+                    if findings.is_empty() {
+                        continue;
+                    }
+                    count += 1;
+                    count += findings.len();
+                }
+                count
             }
             _ => 0,
         }
@@ -820,6 +847,74 @@ impl App {
         }
     }
 
+    pub(crate) fn audit_groups<'a>(
+        &self,
+        report: &'a agentry_audit::report::AuditReport,
+    ) -> std::collections::BTreeMap<
+        agentry_audit::report::Severity,
+        Vec<&'a agentry_audit::report::AuditFinding>,
+    > {
+        let mut groups: std::collections::BTreeMap<
+            agentry_audit::report::Severity,
+            Vec<&agentry_audit::report::AuditFinding>,
+        > = std::collections::BTreeMap::new();
+        for finding in report
+            .agents
+            .iter()
+            .flat_map(|a| a.findings.iter())
+            .chain(report.global_findings.iter())
+        {
+            if let Some(min) = self.audit_filter {
+                if finding.severity > min {
+                    continue;
+                }
+            }
+            groups.entry(finding.severity).or_default().push(finding);
+        }
+        groups
+    }
+
+    pub fn selected_finding(&self) -> Option<&agentry_audit::report::AuditFinding> {
+        if self.tab_index != 5 {
+            return None;
+        }
+        let report = self.audit_report.as_ref()?;
+        let groups = self.audit_groups(report);
+
+        let mut list_row = 0;
+        for findings in groups.values() {
+            if findings.is_empty() {
+                continue;
+            }
+            if self.list_selected == list_row {
+                return None;
+            }
+            list_row += 1;
+            for finding in findings {
+                if self.list_selected == list_row {
+                    return Some(finding);
+                }
+                list_row += 1;
+            }
+        }
+        None
+    }
+
+    fn on_cycle_audit_filter(&mut self) {
+        if self.tab_index != 5 {
+            return;
+        }
+        use agentry_audit::report::Severity;
+        self.audit_filter = match self.audit_filter {
+            None => Some(Severity::Critical),
+            Some(Severity::Critical) => Some(Severity::Warning),
+            Some(Severity::Warning) => Some(Severity::Info),
+            Some(Severity::Info) => Some(Severity::Suggestion),
+            Some(Severity::Suggestion) => None,
+        };
+        self.list_selected = 0;
+    }
+
     /// Shell out to $EDITOR (or nvim/vim/vi) to edit a prompt by its index.
     fn edit_with_external_editor(&mut self, prompt_idx: usize) {
         if prompt_idx >= self.prompts.len() {
@@ -899,6 +994,15 @@ impl App {
         }
     }
 
+    fn finding_edit_path(finding: &agentry_audit::report::AuditFinding) -> Option<PathBuf> {
+        match finding.fix {
+            Some(agentry_audit::report::FixAction::SymlinkRecreate { ref path, .. }) => {
+                Some(path.clone())
+            }
+            _ => None,
+        }
+    }
+
     fn on_enter(&mut self) {
         match self.tab_index {
             0 => {
@@ -967,6 +1071,16 @@ impl App {
                     self.edit_file_externally(&path);
                 } else if has_ws {
                     self.status_message = Some("No docs in this workspace".into());
+                }
+            }
+            5 => {
+                let finding = self.selected_finding().cloned();
+                if let Some(finding) = finding {
+                    if let Some(path) = Self::finding_edit_path(&finding) {
+                        self.edit_file_externally(&path);
+                    } else {
+                        self.status_message = Some(finding.remediation.clone());
+                    }
                 }
             }
             _ => {}
@@ -1041,6 +1155,15 @@ impl App {
         } else {
             self.status_message = Some("Sync: switch to Sync tab (4) to execute".into());
         }
+    }
+
+    fn on_run_audit(&mut self) {
+        let ctx = agentry_audit::engine::build_context(&self.home_dir, self.prompts.clone());
+        let report = agentry_audit::engine::run_audit(&ctx);
+        let finding_count = report.summary.total_findings;
+        self.audit_report = Some(report);
+        self.list_selected = 0;
+        self.status_message = Some(format!("Audit complete: {} findings", finding_count));
     }
 
     fn on_edit(&mut self) {
@@ -1463,5 +1586,248 @@ impl App {
             self.status_message =
                 Some("Workflow: switch to Sync tab (4) to generate workflows".into());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use agentry_audit::report::{
+        AgentAudit, AuditFinding, AuditReport, FindingCategory, HealthGrade, Severity,
+    };
+    use agentry_core::models::DetectedAgent;
+
+    fn finding(severity: Severity, check_id: &str) -> AuditFinding {
+        AuditFinding {
+            check_id: check_id.to_string(),
+            severity,
+            category: FindingCategory::Installation,
+            agent_id: Some("codex".to_string()),
+            message: "test finding".to_string(),
+            remediation: "fix it".to_string(),
+            auto_fixable: false,
+            fix: None,
+            evidence: None,
+        }
+    }
+
+    fn agent_audit(findings: Vec<AuditFinding>) -> AgentAudit {
+        let detected = DetectedAgent {
+            spec: agentry_core::models::AgentSpec {
+                id: "codex".to_string(),
+                name: "codex".to_string(),
+                cli_binary: "codex".to_string(),
+                config_dir: ".codex".to_string(),
+                prompt_filename: "AGENTS.md".to_string(),
+                prompt_format: agentry_core::models::PromptFormat::PlainMd,
+                skills_dir_name: None,
+                max_size: None,
+                install_methods: Vec::new(),
+            },
+            installed: true,
+            version: None,
+            config_dir_exists: true,
+            prompt_file_exists: true,
+            skills_dir: None,
+            skills_symlink_pattern: None,
+            installed_skills: Vec::new(),
+            detected_methods: Vec::new(),
+        };
+        AgentAudit {
+            agent_id: "codex".to_string(),
+            health_score: 100,
+            grade: HealthGrade::Healthy,
+            detected,
+            findings,
+        }
+    }
+
+    fn report_with(findings: Vec<AuditFinding>) -> AuditReport {
+        let json = r#"{"generated_at":"2026-01-01T00:00:00Z","machine_id":"test","agents":[],"global_findings":[],"summary":{"total_findings":0,"by_severity":{},"by_category":{},"auto_fixable_count":0,"healthy_agents":0,"degraded_agents":0}}"#;
+        let mut report: AuditReport = serde_json::from_str(json).unwrap();
+        report.agents = vec![agent_audit(findings)];
+        report
+    }
+
+    fn audit_app(report: AuditReport) -> App {
+        let mut app = App::new();
+        app.tab_index = 5;
+        app.audit_report = Some(report);
+        app
+    }
+
+    #[test]
+    fn list_max_and_selected_finding_agree_on_fixture() {
+        let report = report_with(vec![
+            finding(Severity::Critical, "critical.one"),
+            finding(Severity::Critical, "critical.two"),
+            finding(Severity::Warning, "warning.one"),
+            finding(Severity::Info, "info.one"),
+        ]);
+        let mut app = audit_app(report);
+
+        assert_eq!(app.list_max(), 4 + 3);
+
+        assert!(app.selected_finding().is_none());
+        app.list_selected = 1;
+        assert_eq!(
+            app.selected_finding().map(|f| f.check_id.as_str()),
+            Some("critical.one")
+        );
+        app.list_selected = 2;
+        assert_eq!(
+            app.selected_finding().map(|f| f.check_id.as_str()),
+            Some("critical.two")
+        );
+        app.list_selected = 3;
+        assert!(app.selected_finding().is_none());
+        app.list_selected = 4;
+        assert_eq!(
+            app.selected_finding().map(|f| f.check_id.as_str()),
+            Some("warning.one")
+        );
+        app.list_selected = 5;
+        assert!(app.selected_finding().is_none());
+        app.list_selected = 6;
+        assert_eq!(
+            app.selected_finding().map(|f| f.check_id.as_str()),
+            Some("info.one")
+        );
+        app.list_selected = 7;
+        assert!(app.selected_finding().is_none());
+    }
+
+    #[test]
+    fn list_max_is_zero_without_report() {
+        let mut app = App::new();
+        app.tab_index = 5;
+        assert_eq!(app.list_max(), 0);
+        assert!(app.selected_finding().is_none());
+    }
+
+    #[test]
+    fn selected_finding_requires_audit_tab() {
+        let mut app = audit_app(report_with(vec![finding(
+            Severity::Critical,
+            "critical.one",
+        )]));
+        app.tab_index = 0;
+        app.list_selected = 1;
+        assert!(app.selected_finding().is_none());
+    }
+
+    #[test]
+    fn warning_filter_excludes_info_and_suggestion() {
+        let report = report_with(vec![
+            finding(Severity::Critical, "critical.one"),
+            finding(Severity::Warning, "warning.one"),
+            finding(Severity::Info, "info.one"),
+            finding(Severity::Suggestion, "suggestion.one"),
+        ]);
+        let mut app = audit_app(report);
+        app.audit_filter = Some(Severity::Warning);
+
+        assert_eq!(app.list_max(), 2 + 2);
+
+        app.list_selected = 0;
+        assert!(app.selected_finding().is_none());
+        app.list_selected = 1;
+        assert_eq!(
+            app.selected_finding().map(|f| f.check_id.as_str()),
+            Some("critical.one")
+        );
+        app.list_selected = 2;
+        assert!(app.selected_finding().is_none());
+        app.list_selected = 3;
+        assert_eq!(
+            app.selected_finding().map(|f| f.check_id.as_str()),
+            Some("warning.one")
+        );
+        app.list_selected = 4;
+        assert!(app.selected_finding().is_none());
+    }
+
+    #[test]
+    fn critical_filter_shows_only_critical() {
+        let report = report_with(vec![
+            finding(Severity::Critical, "critical.one"),
+            finding(Severity::Warning, "warning.one"),
+            finding(Severity::Info, "info.one"),
+        ]);
+        let mut app = audit_app(report);
+        app.audit_filter = Some(Severity::Critical);
+
+        assert_eq!(app.list_max(), 1 + 1);
+        app.list_selected = 1;
+        assert_eq!(
+            app.selected_finding().map(|f| f.check_id.as_str()),
+            Some("critical.one")
+        );
+    }
+
+    #[test]
+    fn filter_cycles_through_all_levels() {
+        let mut app = audit_app(report_with(Vec::new()));
+
+        assert_eq!(app.audit_filter, None);
+        app.on_cycle_audit_filter();
+        assert_eq!(app.audit_filter, Some(Severity::Critical));
+        app.on_cycle_audit_filter();
+        assert_eq!(app.audit_filter, Some(Severity::Warning));
+        app.on_cycle_audit_filter();
+        assert_eq!(app.audit_filter, Some(Severity::Info));
+        app.on_cycle_audit_filter();
+        assert_eq!(app.audit_filter, Some(Severity::Suggestion));
+        app.on_cycle_audit_filter();
+        assert_eq!(app.audit_filter, None);
+    }
+
+    #[test]
+    fn filter_cycle_resets_list_selected() {
+        let mut app = audit_app(report_with(vec![
+            finding(Severity::Critical, "critical.one"),
+            finding(Severity::Warning, "warning.one"),
+        ]));
+        app.list_selected = 2;
+        app.on_cycle_audit_filter();
+        assert_eq!(app.list_selected, 0);
+    }
+
+    #[test]
+    fn filter_cycle_ignored_outside_audit_tab() {
+        let mut app = audit_app(report_with(Vec::new()));
+        app.tab_index = 0;
+        app.on_cycle_audit_filter();
+        assert_eq!(app.audit_filter, None);
+    }
+
+    #[test]
+    fn finding_edit_path_for_symlink_recreate() {
+        let mut f = finding(Severity::Critical, "skills.symlink");
+        f.fix = Some(agentry_audit::report::FixAction::SymlinkRecreate {
+            path: "/tmp/skills".into(),
+            target: "../../.agents/skills".to_string(),
+        });
+        assert_eq!(
+            App::finding_edit_path(&f),
+            Some(std::path::PathBuf::from("/tmp/skills"))
+        );
+    }
+
+    #[test]
+    fn finding_edit_path_none_for_other_fix_kinds() {
+        let mut f = finding(Severity::Warning, "config.missing");
+        f.fix = Some(agentry_audit::report::FixAction::ShellCommand {
+            description: "install".to_string(),
+            command: "npm install -g codex".to_string(),
+        });
+        assert_eq!(App::finding_edit_path(&f), None);
+    }
+
+    #[test]
+    fn finding_edit_path_none_without_fix() {
+        let f = finding(Severity::Info, "prompt.missing");
+        assert_eq!(App::finding_edit_path(&f), None);
     }
 }

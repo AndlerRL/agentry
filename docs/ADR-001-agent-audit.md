@@ -285,6 +285,8 @@ New keybindings (Audit tab only):
 | `f` | Cycle severity filter (All / Critical / Warning / Info / Suggestion) | 2 |
 | `Enter` | Toggle detail panel for selected finding | 2 |
 
+> Amendment (P2 implementation): `Enter` opens the finding's file in `$EDITOR` when its fix carries a path (`SymlinkRecreate`), otherwise shows the remediation text; the detail panel is persistent rather than toggled, matching all other tabs.
+
 Phase 2 binds only `r`/`f`; `a`/`A` are wired in Phase 3 when fix mode lands, so no key is bound to a non-existent action in P2. The mockup footer above shows the end state (P3).
 
 #### 4.2 Agents tab health integration

@@ -6,6 +6,8 @@ use ratatui::{
     Frame,
 };
 
+use agentry_audit::report::{AuditReport, HealthGrade, Severity};
+
 use super::Tab;
 use crate::app::App;
 
@@ -85,6 +87,10 @@ pub fn draw_dashboard(f: &mut Frame, app: &App) {
         Some(Tab::OpenClaw) => {
             draw_openclaw_list(f, app, main[0]);
             draw_openclaw_detail(f, app, main[1]);
+        }
+        Some(Tab::Audit) => {
+            draw_audit_list(f, app, main[0]);
+            draw_audit_detail(f, app, main[1]);
         }
         None => {}
     }
@@ -228,6 +234,51 @@ fn draw_agent_detail_enhanced(f: &mut Frame, app: &App, area: Rect) {
             agent_lines.push(Line::from(vec![
                 Span::styled("  Status:   ", Style::default().fg(Color::Yellow)),
                 Span::styled("Not installed", Style::default().fg(Color::Red)),
+            ]));
+        }
+
+        if let Some(ref report) = app.audit_report {
+            if let Some(agent_audit) = report.agents.iter().find(|a| a.agent_id == agent.spec.id) {
+                let critical = agent_audit
+                    .findings
+                    .iter()
+                    .filter(|f| f.severity == Severity::Critical)
+                    .count();
+                let warning = agent_audit
+                    .findings
+                    .iter()
+                    .filter(|f| f.severity == Severity::Warning)
+                    .count();
+                let health = format!(
+                    "{}/100 ({}) · {} critical, {} warning",
+                    agent_audit.health_score,
+                    grade_label(agent_audit.grade),
+                    critical,
+                    warning
+                );
+                agent_lines.push(Line::from(vec![
+                    Span::styled("  Health:   ", Style::default().fg(Color::Yellow)),
+                    Span::styled(
+                        truncate_to_width(&health, detail_width),
+                        Style::default().fg(grade_color(agent_audit.grade)),
+                    ),
+                ]));
+            } else {
+                agent_lines.push(Line::from(vec![
+                    Span::styled("  Health:   ", Style::default().fg(Color::Yellow)),
+                    Span::styled(
+                        "not audited (press r in Audit tab)",
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]));
+            }
+        } else {
+            agent_lines.push(Line::from(vec![
+                Span::styled("  Health:   ", Style::default().fg(Color::Yellow)),
+                Span::styled(
+                    "not audited (press r in Audit tab)",
+                    Style::default().fg(Color::DarkGray),
+                ),
             ]));
         }
 
@@ -1347,6 +1398,304 @@ fn draw_openclaw_detail(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(paragraph, area);
 }
 
+fn severity_label(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Critical => "Critical",
+        Severity::Warning => "Warning",
+        Severity::Info => "Info",
+        Severity::Suggestion => "Suggestion",
+    }
+}
+
+fn severity_color(severity: Severity) -> Color {
+    match severity {
+        Severity::Critical => Color::Red,
+        Severity::Warning => Color::Yellow,
+        Severity::Info => Color::Cyan,
+        Severity::Suggestion => Color::DarkGray,
+    }
+}
+
+fn grade_label(grade: HealthGrade) -> &'static str {
+    match grade {
+        HealthGrade::Healthy => "Healthy",
+        HealthGrade::Degraded => "Degraded",
+        HealthGrade::Unhealthy => "Unhealthy",
+        HealthGrade::Critical => "Critical",
+    }
+}
+
+fn grade_color(grade: HealthGrade) -> Color {
+    match grade {
+        HealthGrade::Healthy => Color::Green,
+        HealthGrade::Degraded => Color::Yellow,
+        HealthGrade::Unhealthy => Color::Red,
+        HealthGrade::Critical => Color::Red,
+    }
+}
+
+fn health_bar(score: u8) -> String {
+    let filled = (score.min(100) / 10) as usize;
+    let mut bar = String::with_capacity(10);
+    for _ in 0..filled {
+        bar.push('█');
+    }
+    for _ in filled..10 {
+        bar.push('░');
+    }
+    bar
+}
+
+fn audit_summary_lines(report: &AuditReport, width: u16) -> Vec<Line<'static>> {
+    let summary = &report.summary;
+    let count = |severity: Severity| summary.by_severity.get(&severity).copied().unwrap_or(0);
+
+    let mut lines = vec![
+        Line::from(Span::styled(
+            format!(" {} findings", summary.total_findings),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(vec![
+            Span::styled(
+                format!("  {} critical", count(Severity::Critical)),
+                Style::default().fg(severity_color(Severity::Critical)),
+            ),
+            Span::raw(" · "),
+            Span::styled(
+                format!("{} warning", count(Severity::Warning)),
+                Style::default().fg(severity_color(Severity::Warning)),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                format!("  {} info", count(Severity::Info)),
+                Style::default().fg(severity_color(Severity::Info)),
+            ),
+            Span::raw(" · "),
+            Span::styled(
+                format!("{} suggestion", count(Severity::Suggestion)),
+                Style::default().fg(severity_color(Severity::Suggestion)),
+            ),
+        ]),
+        Line::from(Span::styled(
+            format!("  {} auto-fixable", summary.auto_fixable_count),
+            Style::default().fg(Color::Green),
+        )),
+        Line::from(""),
+    ];
+
+    for agent in &report.agents {
+        let bar = health_bar(agent.health_score);
+        let grade = grade_label(agent.grade);
+        let row = format!(
+            " {:<12} {} {:>3} {}",
+            agent.detected.spec.name, bar, agent.health_score, grade
+        );
+        lines.push(Line::from(Span::styled(
+            truncate_to_width(&row, width),
+            Style::default().fg(grade_color(agent.grade)),
+        )));
+    }
+
+    lines
+}
+
+fn draw_audit_list(f: &mut Frame, app: &App, area: Rect) {
+    let list_width = area.width.saturating_sub(2);
+
+    let Some(report) = app.audit_report.as_ref() else {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(" Findings (All) ")
+            .border_style(Style::default().fg(Color::Cyan));
+        let paragraph = Paragraph::new(Line::from(Span::styled(
+            "  Press r to run the audit",
+            Style::default().fg(Color::DarkGray),
+        )))
+        .block(block);
+        f.render_widget(paragraph, area);
+        return;
+    };
+
+    let filter_label = match app.audit_filter {
+        None => "All".to_string(),
+        Some(min) => format!("{}+", severity_label(min)),
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" Findings ({}) ", filter_label))
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let summary_lines = audit_summary_lines(report, list_width);
+    let summary_height = summary_lines.len() as u16;
+    let chunks =
+        Layout::vertical([Constraint::Length(summary_height), Constraint::Min(0)]).split(inner);
+    let summary = Paragraph::new(summary_lines);
+    f.render_widget(summary, chunks[0]);
+
+    let mut items: Vec<ListItem> = Vec::new();
+    let groups = app.audit_groups(report);
+    for (severity, findings) in &groups {
+        if findings.is_empty() {
+            continue;
+        }
+        items.push(ListItem::new(Line::from(Span::styled(
+            format!(
+                " ▼ {} ({})",
+                severity_label(*severity).to_uppercase(),
+                findings.len()
+            ),
+            Style::default()
+                .fg(severity_color(*severity))
+                .add_modifier(Modifier::BOLD),
+        ))));
+        for finding in findings {
+            let agent = finding.agent_id.as_deref().unwrap_or("-");
+            let row = format!("   [{}] {} — {}", agent, finding.check_id, finding.message);
+            items.push(ListItem::new(Line::from(Span::styled(
+                truncate_to_width(&row, list_width),
+                Style::default().fg(Color::White),
+            ))));
+        }
+    }
+
+    let mut state = ListState::default();
+    if app.list_selected < items.len() {
+        state.select(Some(app.list_selected));
+    }
+
+    let list = List::new(items).highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    f.render_stateful_widget(list, chunks[1], &mut state);
+}
+
+fn draw_audit_detail(f: &mut Frame, app: &App, area: Rect) {
+    let detail_width = area.width.saturating_sub(4);
+
+    let lines = if let Some(finding) = app.selected_finding() {
+        let mut detail_lines = vec![
+            Line::from(Span::styled(
+                format!(" {} ", finding.check_id),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  Severity:  ", Style::default().fg(Color::Yellow)),
+                Span::styled(
+                    severity_label(finding.severity),
+                    Style::default()
+                        .fg(severity_color(finding.severity))
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("  Category:  ", Style::default().fg(Color::Yellow)),
+                Span::styled(
+                    format!("{:?}", finding.category),
+                    Style::default().fg(Color::White),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("  Agent:     ", Style::default().fg(Color::Yellow)),
+                Span::styled(
+                    finding.agent_id.clone().unwrap_or_else(|| "-".to_string()),
+                    Style::default().fg(Color::White),
+                ),
+            ]),
+        ];
+
+        if finding.auto_fixable {
+            detail_lines.push(Line::from(vec![
+                Span::styled("  Auto-fix:  ", Style::default().fg(Color::Yellow)),
+                Span::styled("yes", Style::default().fg(Color::Green)),
+            ]));
+        }
+
+        detail_lines.push(Line::from(""));
+        detail_lines.push(Line::from(Span::styled(
+            " ── Message ──────────────────────────",
+            Style::default().fg(Color::DarkGray),
+        )));
+        for line in finding.message.lines().take(10) {
+            detail_lines.push(Line::from(Span::styled(
+                format!(
+                    " {}",
+                    truncate_to_width(line, detail_width.saturating_sub(1))
+                ),
+                Style::default().fg(Color::White),
+            )));
+        }
+
+        if let Some(ref evidence) = finding.evidence {
+            detail_lines.push(Line::from(""));
+            detail_lines.push(Line::from(Span::styled(
+                " ── Evidence ─────────────────────────",
+                Style::default().fg(Color::DarkGray),
+            )));
+            for line in evidence.lines().take(10) {
+                detail_lines.push(Line::from(Span::styled(
+                    format!(
+                        " {}",
+                        truncate_to_width(line, detail_width.saturating_sub(1))
+                    ),
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+        }
+
+        detail_lines.push(Line::from(""));
+        detail_lines.push(Line::from(Span::styled(
+            " ── Remediation ──────────────────────",
+            Style::default().fg(Color::DarkGray),
+        )));
+        for line in finding.remediation.lines().take(10) {
+            detail_lines.push(Line::from(Span::styled(
+                format!(
+                    " {}",
+                    truncate_to_width(line, detail_width.saturating_sub(1))
+                ),
+                Style::default().fg(Color::Green),
+            )));
+        }
+
+        detail_lines
+    } else if let Some(ref report) = app.audit_report {
+        let mut detail_lines = audit_summary_lines(report, detail_width);
+        detail_lines.push(Line::from(""));
+        detail_lines.push(Line::from(Span::styled(
+            "  Select a finding to view details",
+            Style::default().fg(Color::DarkGray),
+        )));
+        detail_lines
+    } else {
+        vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Select a finding to view details",
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  r: Run audit  f: Cycle severity filter",
+                Style::default().fg(Color::Yellow),
+            )),
+        ]
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Finding Details ")
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let paragraph = Paragraph::new(lines).block(block);
+    f.render_widget(paragraph, area);
+}
+
 // ── Help ─────────────────────────────────────────────────────────────────
 
 fn draw_help(f: &mut Frame, area: Rect) {
@@ -1367,7 +1716,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
             Span::raw("Switch tabs"),
         ]),
         Line::from(vec![
-            Span::styled("  1-5        ", Style::default().fg(Color::Yellow)),
+            Span::styled("  1-6        ", Style::default().fg(Color::Yellow)),
             Span::raw("Jump to tab (1=Agents, 2=Prompts, ...)"),
         ]),
         Line::from(Span::styled(
@@ -1447,6 +1796,26 @@ fn draw_help(f: &mut Frame, area: Rect) {
             Span::raw("Generate workflow"),
         ]),
         Line::from(Span::styled(
+            " ── Audit ───────────────────────",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(vec![
+            Span::styled("  r          ", Style::default().fg(Color::Yellow)),
+            Span::raw("Re-run audit"),
+        ]),
+        Line::from(vec![
+            Span::styled("  f          ", Style::default().fg(Color::Yellow)),
+            Span::raw("Cycle severity filter"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Enter      ", Style::default().fg(Color::Yellow)),
+            Span::raw("Open finding file / show remediation"),
+        ]),
+        Line::from(vec![
+            Span::styled("  j/k        ", Style::default().fg(Color::Yellow)),
+            Span::raw("Navigate findings"),
+        ]),
+        Line::from(Span::styled(
             " ── General ─────────────────────",
             Style::default().fg(Color::DarkGray),
         )),
@@ -1470,11 +1839,71 @@ fn draw_help(f: &mut Frame, area: Rect) {
         .border_style(Style::default().fg(Color::Cyan));
 
     let width = 52.min(area.width);
-    let height = 23.min(area.height);
+    let height = 36.min(area.height);
     let x = (area.width.saturating_sub(width)) / 2;
     let y = (area.height.saturating_sub(height)) / 2;
     let popup_area = Rect::new(x, y, width, height);
 
     let paragraph = Paragraph::new(help_text).block(block);
     f.render_widget(paragraph, popup_area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn health_bar_at_bounds_and_middle() {
+        assert_eq!(health_bar(0), "░░░░░░░░░░");
+        assert_eq!(health_bar(50), "█████░░░░░");
+        assert_eq!(health_bar(100), "██████████");
+    }
+
+    #[test]
+    fn health_bar_clamps_out_of_range_scores() {
+        assert_eq!(health_bar(150), "██████████");
+        assert_eq!(health_bar(82), "████████░░");
+    }
+
+    #[test]
+    fn agent_detail_shows_not_audited_without_report() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![agentry_core::models::DetectedAgent {
+            spec: agentry_core::models::AgentSpec {
+                id: "codex".to_string(),
+                name: "codex".to_string(),
+                cli_binary: "codex".to_string(),
+                config_dir: ".codex".to_string(),
+                prompt_filename: "AGENTS.md".to_string(),
+                prompt_format: agentry_core::models::PromptFormat::PlainMd,
+                skills_dir_name: None,
+                max_size: None,
+                install_methods: Vec::new(),
+            },
+            installed: true,
+            version: None,
+            config_dir_exists: true,
+            prompt_file_exists: true,
+            skills_dir: None,
+            skills_symlink_pattern: None,
+            installed_skills: Vec::new(),
+            detected_methods: Vec::new(),
+        }];
+
+        let backend = ratatui::backend::TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| draw_agent_detail_enhanced(f, &app, f.area()))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let rendered: String = buffer
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(rendered.contains("not audited (press r in Audit tab)"));
+    }
 }
