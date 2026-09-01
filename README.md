@@ -227,7 +227,7 @@ agentry-audit ──> agentry-core, agentry-agents, agentry-sync, agentry-skills
 The quickest way to install. The installer downloads the right build for your platform and places the binary in your Cargo home bin directory (`$CARGO_HOME/bin`):
 
 ```bash
-curl -LsSf https://github.com/AndlerRL/agentry/releases/latest/download/agentry-installer.sh | sh
+curl -LsSf https://github.com/AndlerRL/agentry/releases/latest/download/agentry-tui-installer.sh | sh
 ```
 
 ### Install with Cargo
@@ -250,19 +250,19 @@ Download the archive for your platform from [GitHub Releases](https://github.com
 
 | Platform | Archive |
 |----------|---------|
-| macOS (Apple Silicon) | `agentry-aarch64-apple-darwin.tar.xz` |
-| macOS (Intel) | `agentry-x86_64-apple-darwin.tar.xz` |
-| Linux (x86_64, glibc) | `agentry-x86_64-unknown-linux-gnu.tar.xz` |
-| Linux (ARM64, glibc) | `agentry-aarch64-unknown-linux-gnu.tar.xz` |
-| Linux (x86_64, static/musl) | `agentry-x86_64-unknown-linux-musl.tar.xz` |
+| macOS (Apple Silicon) | `agentry-tui-aarch64-apple-darwin.tar.xz` |
+| macOS (Intel) | `agentry-tui-x86_64-apple-darwin.tar.xz` |
+| Linux (x86_64, glibc) | `agentry-tui-x86_64-unknown-linux-gnu.tar.xz` |
+| Linux (ARM64, glibc) | `agentry-tui-aarch64-unknown-linux-gnu.tar.xz` |
+| Linux (x86_64, static/musl) | `agentry-tui-x86_64-unknown-linux-musl.tar.xz` |
 
-Each archive extracts to a versioned directory (`agentry-v<version>-<target>/`) containing the `agentry` binary:
+Each archive extracts to a versioned directory (`agentry-tui-v<version>-<target>/`) containing the `agentry` binary:
 
 ```bash
 # Example: macOS (Apple Silicon)
-curl -LO https://github.com/AndlerRL/agentry/releases/latest/download/agentry-aarch64-apple-darwin.tar.xz
-tar xf agentry-aarch64-apple-darwin.tar.xz
-cd agentry-v*/
+curl -LO https://github.com/AndlerRL/agentry/releases/latest/download/agentry-tui-aarch64-apple-darwin.tar.xz
+tar xf agentry-tui-aarch64-apple-darwin.tar.xz
+cd agentry-tui-v*/
 mv agentry ~/.local/bin/
 ```
 
