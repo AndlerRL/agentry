@@ -22,12 +22,13 @@ fn symlink_broken(ctx: &CheckContext, agent: &DetectedAgent) -> Vec<AuditFinding
     let Some(dir) = skills_dir(ctx, agent) else {
         return Vec::new();
     };
+    let canonical_root = ctx.home_dir.join(".agents").join("skills");
     let mut links = Vec::new();
     collect_symlinks(&dir, &mut links);
     links
         .iter()
         .filter(|link| !verify_symlink_target(link))
-        .map(|link| broken_link_finding(agent, &dir, link))
+        .map(|link| broken_link_finding(agent, &dir, link, &canonical_root))
         .collect()
 }
 
@@ -56,7 +57,12 @@ fn collect_symlinks(dir: &Path, links: &mut Vec<PathBuf>) {
     }
 }
 
-fn broken_link_finding(agent: &DetectedAgent, skills_root: &Path, link: &Path) -> AuditFinding {
+fn broken_link_finding(
+    agent: &DetectedAgent,
+    skills_root: &Path,
+    link: &Path,
+    canonical_root: &Path,
+) -> AuditFinding {
     let name = link
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
@@ -67,6 +73,27 @@ fn broken_link_finding(agent: &DetectedAgent, skills_root: &Path, link: &Path) -
         .unwrap_or(0);
     let prefix = "../".repeat(depth + 2);
     let target = format!("{prefix}.agents/skills/{name}");
+    let canonical_exists = canonical_root.join(&name).exists();
+    let (remediation, auto_fixable, fix) = if canonical_exists {
+        (
+            format!(
+                "Recreate the symlink '{}' to point to '{}'",
+                link.display(),
+                target
+            ),
+            true,
+            Some(FixAction::SymlinkRecreate {
+                path: link.to_path_buf(),
+                target,
+            }),
+        )
+    } else {
+        (
+            format!("no canonical skill named '{name}'; remove the link or install the skill"),
+            false,
+            None,
+        )
+    };
     AuditFinding {
         check_id: "skills.symlink_broken".to_string(),
         severity: Severity::Warning,
@@ -77,16 +104,9 @@ fn broken_link_finding(agent: &DetectedAgent, skills_root: &Path, link: &Path) -
             agent.spec.name,
             link.display()
         ),
-        remediation: format!(
-            "Recreate the symlink '{}' to point to '{}'",
-            link.display(),
-            target
-        ),
-        auto_fixable: true,
-        fix: Some(FixAction::SymlinkRecreate {
-            path: link.to_path_buf(),
-            target,
-        }),
+        remediation,
+        auto_fixable,
+        fix,
         evidence: Some(format!("symlink={} resolves=false", link.display())),
     }
 }
@@ -273,10 +293,12 @@ mod tests {
     fn symlink_broken_fires_when_target_does_not_resolve() {
         let tmp = TempDir::new("agentry_audit_skills_broken_fires");
         let skills = tmp.path().join(".claude").join("skills");
+        let canonical = tmp.path().join(".agents").join("skills").join("git");
+        std::fs::create_dir_all(&canonical).unwrap();
         std::fs::create_dir_all(&skills).unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink(
-            tmp.path().join(".agents").join("skills").join("git"),
+            tmp.path().join(".agents").join("skills").join("wrong-name"),
             skills.join("git"),
         )
         .unwrap();
@@ -336,6 +358,8 @@ mod tests {
         let tmp = TempDir::new("agentry_audit_skills_broken_nested");
         let skills = tmp.path().join(".claude").join("skills");
         let nested = skills.join("group");
+        let canonical = tmp.path().join(".agents").join("skills").join("inner");
+        std::fs::create_dir_all(&canonical).unwrap();
         std::fs::create_dir_all(&nested).unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink(
@@ -355,6 +379,28 @@ mod tests {
             }
             other => panic!("expected SymlinkRecreate fix, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn symlink_broken_without_canonical_skill_has_no_fix() {
+        let tmp = TempDir::new("agentry_audit_skills_broken_nocanonical");
+        let skills = tmp.path().join(".claude").join("skills");
+        let venv_bin = skills.join("nano-banana-pro").join(".venv").join("bin");
+        std::fs::create_dir_all(&venv_bin).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("/nonexistent/python3", venv_bin.join("python3")).unwrap();
+        let findings = run(&ctx(
+            tmp.path().clone(),
+            vec![skills_agent("claude-code", ".claude")],
+        ));
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].check_id, "skills.symlink_broken");
+        assert_eq!(findings[0].severity, Severity::Warning);
+        assert!(!findings[0].auto_fixable);
+        assert!(findings[0].fix.is_none());
+        assert!(findings[0]
+            .remediation
+            .contains("no canonical skill named 'python3'"));
     }
 
     #[test]

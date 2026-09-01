@@ -102,6 +102,24 @@ pub fn apply_sync_prompt_with_agents(
     else {
         return fail(format!("no sync mapping for agent '{agent_id}'"));
     };
+    let shared = prompts
+        .iter()
+        .filter(|other| other.id != prompt.id)
+        .filter(|other| {
+            plan_sync(other, agents, home_dir).mappings.iter().any(|m| {
+                m.agent_id == agent_id
+                    && m.action != SyncAction::Skip
+                    && m.destination == mapping.destination
+            })
+        })
+        .count();
+    if shared > 0 {
+        return fail(format!(
+            "destination {} is shared by {} prompts; run agentry sync --all to rebuild all prompts for this agent",
+            mapping.destination.display(),
+            shared + 1
+        ));
+    }
     let results = execute_sync(prompt, std::slice::from_ref(mapping), false);
     let result = &results[0];
     FixOutcome {
@@ -197,7 +215,17 @@ fn recreate_symlink(path: &Path, target: &str, home_dir: &Path) -> (bool, String
         }
     }
     match std::os::unix::fs::symlink(target, path) {
-        Ok(()) => (true, format!("symlinked {} -> {}", path.display(), target)),
+        Ok(()) => match path.canonicalize() {
+            Ok(_) => (true, format!("symlinked {} -> {}", path.display(), target)),
+            Err(err) => (
+                false,
+                format!(
+                    "target does not exist after recreation: {} -> {}: {err}",
+                    path.display(),
+                    target
+                ),
+            ),
+        },
         Err(err) => (
             false,
             format!("failed to symlink {}: {err}", path.display()),
@@ -289,7 +317,8 @@ mod tests {
 
     use super::*;
     use crate::report::{AuditSummary, FindingCategory, Severity};
-    use agentry_core::models::{AgentSpec, PromptFormat};
+    use agentry_core::models::{AgentSpec, PromptFormat, SyncStatus};
+    use agentry_sync::executor::check_sync_status;
 
     struct TempDir {
         path: PathBuf,
@@ -495,6 +524,27 @@ mod tests {
     }
 
     #[test]
+    fn test_apply_fix_symlink_recreate_missing_target_is_unsuccessful() {
+        let tmp = TempDir::new("agentry_test_fix_symlink_missing");
+        let link = tmp.path().join("skills");
+        let finding = finding(
+            "skills_link",
+            Some(FixAction::SymlinkRecreate {
+                path: link.clone(),
+                target: "../../.agents/skills/python3".to_string(),
+            }),
+            true,
+        );
+        let outcome = apply_fix(&finding, tmp.path());
+        assert!(!outcome.success);
+        assert!(outcome
+            .message
+            .contains("target does not exist after recreation"));
+        assert!(link.is_symlink());
+        assert!(!link.exists());
+    }
+
+    #[test]
     fn test_apply_fix_refuses_absolute_symlink_target() {
         let tmp = TempDir::new("agentry_test_fix_symlink_abs");
         let link = tmp.path().join("skills");
@@ -588,6 +638,104 @@ mod tests {
             apply_sync_prompt_with_agents("nope", "gemini-cli", "prompt_sync", tmp.path(), &agents);
         assert!(!outcome.success);
         assert!(outcome.message.contains("not found"));
+    }
+
+    #[test]
+    fn test_apply_sync_prompt_shared_destination_is_refused() {
+        let tmp = TempDir::new("agentry_test_fix_sync_shared");
+        let canonical_dir = tmp.path().join(".agents").join("prompts");
+        std::fs::create_dir_all(&canonical_dir).unwrap();
+        std::fs::write(canonical_dir.join("ALPHA.md"), "alpha body").unwrap();
+        std::fs::write(canonical_dir.join("BETA.md"), "beta body").unwrap();
+
+        let agents = vec![DetectedAgent {
+            spec: AgentSpec {
+                id: "claude-code".to_string(),
+                name: "Claude Code".to_string(),
+                cli_binary: "claude".to_string(),
+                config_dir: ".claude".to_string(),
+                prompt_filename: "CLAUDE.md".to_string(),
+                prompt_format: PromptFormat::PlainMd,
+                skills_dir_name: None,
+                max_size: None,
+                install_methods: vec![],
+            },
+            installed: true,
+            version: None,
+            config_dir_exists: true,
+            prompt_file_exists: false,
+            skills_dir: None,
+            skills_symlink_pattern: None,
+            installed_skills: vec![],
+            detected_methods: vec![],
+        }];
+
+        let outcome = apply_sync_prompt_with_agents(
+            "ALPHA",
+            "claude-code",
+            "sync.drift",
+            tmp.path(),
+            &agents,
+        );
+        assert!(!outcome.success);
+        assert!(outcome.message.contains("shared by 2 prompts"));
+        assert!(outcome.message.contains("agentry sync --all"));
+        let dest = tmp.path().join(".claude").join("CLAUDE.md");
+        assert!(!dest.exists());
+    }
+
+    #[test]
+    fn test_apply_sync_prompt_single_destination_persists_and_clears_drift() {
+        let tmp = TempDir::new("agentry_test_fix_sync_persist");
+        let canonical_dir = tmp.path().join(".agents").join("prompts");
+        std::fs::create_dir_all(&canonical_dir).unwrap();
+        std::fs::write(
+            canonical_dir.join("GEMINI.md"),
+            "# GEMINI\n\nCanonical prompt",
+        )
+        .unwrap();
+
+        let agents = vec![DetectedAgent {
+            spec: AgentSpec {
+                id: "gemini-cli".to_string(),
+                name: "Gemini CLI".to_string(),
+                cli_binary: "gemini".to_string(),
+                config_dir: ".gemini".to_string(),
+                prompt_filename: "GEMINI.md".to_string(),
+                prompt_format: PromptFormat::PlainMd,
+                skills_dir_name: None,
+                max_size: None,
+                install_methods: vec![],
+            },
+            installed: true,
+            version: None,
+            config_dir_exists: true,
+            prompt_file_exists: false,
+            skills_dir: None,
+            skills_symlink_pattern: None,
+            installed_skills: vec![],
+            detected_methods: vec![],
+        }];
+
+        let outcome = apply_sync_prompt_with_agents(
+            "GEMINI",
+            "gemini-cli",
+            "sync.drift",
+            tmp.path(),
+            &agents,
+        );
+        assert!(outcome.success, "{}", outcome.message);
+        let dest = tmp.path().join(".gemini").join("GEMINI.md");
+        assert_eq!(
+            std::fs::read_to_string(&dest).unwrap(),
+            "# GEMINI\n\nCanonical prompt"
+        );
+
+        let prompts = discover_prompts(tmp.path(), &[tmp.path().join(DEFAULT_PROJECT_DIR)]);
+        let prompt = prompts.iter().find(|p| p.name == "GEMINI").unwrap();
+        let plan = plan_sync(prompt, &agents, tmp.path());
+        let statuses = check_sync_status(prompt, &plan.mappings);
+        assert!(statuses.iter().all(|m| m.status == SyncStatus::UpToDate));
     }
 
     #[test]
