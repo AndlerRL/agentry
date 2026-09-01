@@ -69,6 +69,7 @@ agentry is a terminal UI application that manages prompts for **11 agent CLIs** 
 - **Skill hub** -- Browse, install, and update community skills from Git repositories
 - **OpenClaw workspace** -- Discover and manage OpenClaw `.lobster` workflows
 - **ACP orchestration** -- Agent Communication Protocol for multi-agent routing
+- **Agent audit** -- Health scores (0-100) from 24 diagnostic checks, with `--fix` mode gated by a fail-closed shell allowlist and a self-evolving feedback loop
 - **Vim-like TUI** -- Terminal interface with modal editing and familiar keybindings
 
 ## Format Converters
@@ -91,12 +92,12 @@ The terminal UI features an intro animation with ASCII art and a progress bar wh
 
 | Tab | Key | Description |
 |-----|-----|-------------|
-| Dashboard | `1` | Overview of detected agents and system status |
-| Agents | `2` | Browse detected agents, versions, skills, and config paths |
-| Prompts | `3` | Manage and edit prompts with vim-like editor |
-| Skills | `4` | Browse and install skill hub entries |
-| Sync | `5` | Plan and execute prompt sync |
-| OpenClaw | `6` | Manage OpenClaw workspaces |
+| Agents | `1` | Browse detected agents, versions, skills, and config paths |
+| Prompts | `2` | Manage and edit prompts with vim-like editor |
+| Skills | `3` | Browse and install skill hub entries |
+| Sync | `4` | Plan and execute prompt sync |
+| OpenClaw | `5` | Manage OpenClaw workspaces |
+| Audit | `6` | Run agent health audits and review findings |
 
 ### Keybindings
 
@@ -115,6 +116,14 @@ The terminal UI features an intro animation with ASCII art and a progress bar wh
 | `:w` / `:q` | Write/quit (vim-like commands) |
 | `?` | Toggle help overlay |
 | `q` | Quit |
+
+Audit tab keys:
+
+| Key | Action |
+|-----|--------|
+| `r` | Re-run audit |
+| `f` | Cycle severity filter (All / Critical / Warning / Info / Suggestion) |
+| `Enter` | Open finding file / show remediation |
 
 ## CLI Usage
 
@@ -148,11 +157,23 @@ agentry prompts list
 
 # Browse OpenClaw workspaces
 agentry openclaw workspaces
+
+# Run a full agent health audit
+agentry audit
+
+# Audit a single agent
+agentry audit --agent claude-code
+
+# Machine-readable report (CI/agentic gate)
+agentry audit --json
+
+# Apply auto-fixes
+agentry audit --fix --yes
 ```
 
 ## Architecture
 
-agentry is organized as a Cargo workspace with 7 crates:
+agentry is organized as a Cargo workspace with 8 crates:
 
 ```
 agentry/
@@ -164,6 +185,7 @@ agentry/
 │   ├── agentry-skills/          # Skill hub, lockfile, and installer
 │   ├── agentry-openclaw/        # OpenClaw workspace discovery and docs
 │   ├── agentry-acp/             # ACP protocol and message router
+│   ├── agentry-audit/           # Agent health audit engine and remediation
 │   └── agentry-tui/             # Terminal UI (binary crate: `agentry`)
 └── tests/
     └── integration/             # Integration tests
@@ -178,13 +200,15 @@ agentry-tui
 ├── agentry-sync
 ├── agentry-skills
 ├── agentry-openclaw
-└── agentry-acp
+├── agentry-acp
+└── agentry-audit
 
 agentry-agents ──> agentry-core
 agentry-sync   ──> agentry-core, agentry-agents
 agentry-skills ──> agentry-core
 agentry-openclaw ──> agentry-core, agentry-agents
 agentry-acp   ──> agentry-core, agentry-agents, agentry-skills
+agentry-audit ──> agentry-core, agentry-agents, agentry-sync, agentry-skills, agentry-openclaw, agentry-acp
 ```
 
 ### Core Models
@@ -239,6 +263,17 @@ cargo build --release
 # Binary at target/release/agentry
 cp target/release/agentry /usr/local/bin/
 ```
+
+> **Linux prerequisites**: The build links against OpenSSL via `git2`. Install the native dependencies first:
+> ```bash
+> # Debian/Ubuntu
+> sudo apt install libssl-dev pkg-config
+>
+> # Fedora
+> dnf install openssl-devel
+> ```
+>
+> **Windows is not yet supported.**
 
 ## Configuration
 
