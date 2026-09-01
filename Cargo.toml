@@ -54,12 +54,12 @@ semver = "1"
 dirs = "6"
 
 # Internal crates
-agentry-core = { path = "crates/agentry-core" }
-agentry-agents = { path = "crates/agentry-agents" }
-agentry-sync = { path = "crates/agentry-sync" }
-agentry-skills = { path = "crates/agentry-skills" }
-agentry-openclaw = { path = "crates/agentry-openclaw" }
-agentry-acp = { path = "crates/agentry-acp" }
+agentry-core = { path = "crates/agentry-core", version = "0.2.0" }
+agentry-agents = { path = "crates/agentry-agents", version = "0.2.0" }
+agentry-sync = { path = "crates/agentry-sync", version = "0.2.0" }
+agentry-skills = { path = "crates/agentry-skills", version = "0.2.0" }
+agentry-openclaw = { path = "crates/agentry-openclaw", version = "0.2.0" }
+agentry-acp = { path = "crates/agentry-acp", version = "0.2.0" }
 
 # The profile that 'dist' will build with
 [profile.dist]
