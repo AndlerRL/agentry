@@ -42,7 +42,8 @@ crossterm = "0.28"
 clap = { version = "4", features = ["derive"] }
 
 # Git
-git2 = "0.19"
+git2 = { version = "0.19", features = ["vendored-libgit2"] }
+openssl = { version = "0.10", features = ["vendored"] }
 
 # Crypto
 sha1 = "0.10"

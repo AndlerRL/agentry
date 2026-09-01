@@ -3,7 +3,6 @@ name: CI
 on:
   push:
     branches: [master]
-    tags: ['v*']
   pull_request:
     branches: [master]
 
@@ -18,7 +17,7 @@ jobs:
       matrix:
         os: [macos-latest, ubuntu-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.89.0
         with:

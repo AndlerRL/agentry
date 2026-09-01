@@ -15,5 +15,6 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 git2 = { workspace = true }
+openssl = { workspace = true }
 sha1 = { workspace = true }
 chrono = { workspace = true }

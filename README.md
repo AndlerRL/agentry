@@ -222,37 +222,54 @@ agentry-audit ──> agentry-core, agentry-agents, agentry-sync, agentry-skills
 
 ## Installation
 
-### Pre-built Binaries (macOS & Linux)
+### Shell Installer (Recommended)
 
-Download the latest release from [GitHub Releases](https://github.com/AndlerRL/agentry/releases):
+The quickest way to install. The installer downloads the right build for your platform and places the binary in your Cargo home bin directory (`$CARGO_HOME/bin`):
 
 ```bash
-# macOS (Apple Silicon)
-curl -L https://github.com/AndlerRL/agentry/releases/latest/download/agentry-macos-arm64.tar.gz | tar xz
-chmod +x agentry-aarch64-apple-darwin
-sudo mv agentry-aarch64-apple-darwin /usr/local/bin/agentry
+curl -LsSf https://github.com/AndlerRL/agentry/releases/latest/download/agentry-installer.sh | sh
+```
 
-# macOS (Intel)
-curl -L https://github.com/AndlerRL/agentry/releases/latest/download/agentry-macos-x86_64.tar.gz | tar xz
-chmod +x agentry-x86_64-apple-darwin
-sudo mv agentry-x86_64-apple-darwin /usr/local/bin/agentry
+### Install with Cargo
 
-# Linux (x86_64)
-curl -L https://github.com/AndlerRL/agentry/releases/latest/download/agentry-linux-x86_64.tar.gz | tar xz
-chmod +x agentry-x86_64-unknown-linux-gnu
-sudo mv agentry-x86_64-unknown-linux-gnu /usr/local/bin/agentry
+Once the crate is published to crates.io:
+
+```bash
+cargo install agentry-tui
+```
+
+> **Note**: This requires the `agentry-tui` crate to be published to crates.io. To install directly from the repository in the meantime:
+>
+> ```bash
+> cargo install --git https://github.com/AndlerRL/agentry --bin agentry
+> ```
+
+### Pre-built Binaries (macOS & Linux)
+
+Download the archive for your platform from [GitHub Releases](https://github.com/AndlerRL/agentry/releases). Each archive is also available directly at `https://github.com/AndlerRL/agentry/releases/latest/download/<archive>`:
+
+| Platform | Archive |
+|----------|---------|
+| macOS (Apple Silicon) | `agentry-aarch64-apple-darwin.tar.xz` |
+| macOS (Intel) | `agentry-x86_64-apple-darwin.tar.xz` |
+| Linux (x86_64, glibc) | `agentry-x86_64-unknown-linux-gnu.tar.xz` |
+| Linux (ARM64, glibc) | `agentry-aarch64-unknown-linux-gnu.tar.xz` |
+| Linux (x86_64, static/musl) | `agentry-x86_64-unknown-linux-musl.tar.xz` |
+
+Each archive extracts to a versioned directory (`agentry-v<version>-<target>/`) containing the `agentry` binary:
+
+```bash
+# Example: macOS (Apple Silicon)
+curl -LO https://github.com/AndlerRL/agentry/releases/latest/download/agentry-aarch64-apple-darwin.tar.xz
+tar xf agentry-aarch64-apple-darwin.tar.xz
+cd agentry-v*/
+mv agentry ~/.local/bin/
 ```
 
 > **macOS Gatekeeper**: If you see "cannot be opened because it is from an unidentified developer", run:
 > ```bash
-> xattr -d com.apple.quarantine /usr/local/bin/agentry
+> xattr -d com.apple.quarantine ~/.local/bin/agentry
 > ```
-
-### Install with Cargo
-
-```bash
-cargo install --git https://github.com/AndlerRL/agentry --bin agentry
-```
 
 ### Build from Source
 
@@ -264,7 +281,7 @@ cargo build --release
 cp target/release/agentry /usr/local/bin/
 ```
 
-> **Linux prerequisites**: The build links against OpenSSL via `git2`. Install the native dependencies first:
+> **Linux prerequisites**: The build links against OpenSSL via `git2`, which may require the native development packages:
 > ```bash
 > # Debian/Ubuntu
 > sudo apt install libssl-dev pkg-config
