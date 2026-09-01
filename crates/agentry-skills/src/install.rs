@@ -39,7 +39,7 @@ pub fn install_skill(
     }
 
     // Clone the repo to a temp directory
-    let temp_dir = std::env::temp_dir().join(format!("agentry-skill-{}", &skill_name));
+    let temp_dir = std::env::temp_dir().join(format!("agentry-skill-{}", skill_name));
     let _ = std::fs::remove_dir_all(&temp_dir);
 
     let source_url = if source_repo.starts_with("https://") || source_repo.starts_with("git://") {
