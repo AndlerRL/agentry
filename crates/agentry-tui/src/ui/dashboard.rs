@@ -109,7 +109,15 @@ pub fn draw_dashboard(f: &mut Frame, app: &App) {
     f.render_widget(status_bar, chunks[2]);
 
     f.render_widget(ratatui::widgets::Clear, chunks[3]);
-    let keymap_lines = crate::ui::keymap::bar_lines(app.tab_index, app, chunks[3].width as usize);
+    let keymap_lines = if app.delete_confirm.is_some()
+        || app.skill_confirm.is_some()
+        || app.agent_confirm.is_some()
+        || app.sync_confirm.is_some()
+    {
+        crate::ui::keymap::confirm_bar_lines()
+    } else {
+        crate::ui::keymap::bar_lines(app.tab_index, app, chunks[3].width as usize)
+    };
     if !keymap_lines.is_empty() {
         let keymap_bar = Paragraph::new(keymap_lines);
         f.render_widget(keymap_bar, chunks[3]);
@@ -1532,143 +1540,59 @@ fn draw_audit_detail(f: &mut Frame, app: &App, area: Rect) {
 // ── Help ─────────────────────────────────────────────────────────────────
 
 fn draw_help(f: &mut Frame, area: Rect) {
-    let help_text = vec![
-        Line::from(Span::styled(
-            " agentry — Keybindings ",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("  j/k, ↑/↓  ", Style::default().fg(Color::Yellow)),
-            Span::raw("Navigate list"),
-        ]),
-        Line::from(vec![
-            Span::styled("  Tab/S-Tab  ", Style::default().fg(Color::Yellow)),
-            Span::raw("Switch tabs"),
-        ]),
-        Line::from(vec![
-            Span::styled("  1-5        ", Style::default().fg(Color::Yellow)),
-            Span::raw("Jump to tab (resets selection)"),
-        ]),
-        Line::from(Span::styled(
-            " ── Agents (1) ──────────────────",
+    let app = App::new();
+    let mut help_text = vec![Line::from(Span::styled(
+        " agentry — Keybindings ",
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    ))];
+
+    for tab in super::Tab::ALL {
+        let tab_index = tab as usize;
+        help_text.push(Line::from(Span::styled(
+            format!(" ── {} ({}) ──────────────────", tab.title(), tab_index + 1),
             Style::default().fg(Color::DarkGray),
-        )),
-        Line::from(vec![
-            Span::styled("  ←/→       ", Style::default().fg(Color::Yellow)),
-            Span::raw("Select install method"),
-        ]),
-        Line::from(vec![
-            Span::styled("  Enter      ", Style::default().fg(Color::Yellow)),
-            Span::raw("Install via selected method"),
-        ]),
-        Line::from(vec![
-            Span::styled("  u          ", Style::default().fg(Color::Yellow)),
-            Span::raw("Update via selected method"),
-        ]),
-        Line::from(vec![
-            Span::styled("  r          ", Style::default().fg(Color::Yellow)),
-            Span::raw("Remove via selected method"),
-        ]),
-        Line::from(vec![
-            Span::styled("  v          ", Style::default().fg(Color::Yellow)),
-            Span::raw("List versions (j/k, Enter installs)"),
-        ]),
-        Line::from(Span::styled(
-            " ── Prompts (2) ─────────────────",
-            Style::default().fg(Color::DarkGray),
-        )),
-        Line::from(vec![
-            Span::styled("  Enter      ", Style::default().fg(Color::Yellow)),
-            Span::raw("Edit prompt via $EDITOR"),
-        ]),
-        Line::from(vec![
-            Span::styled("  n          ", Style::default().fg(Color::Yellow)),
-            Span::raw("New prompt"),
-        ]),
-        Line::from(vec![
-            Span::styled("  d          ", Style::default().fg(Color::Yellow)),
-            Span::raw("Delete prompt"),
-        ]),
-        Line::from(vec![
-            Span::styled("  e          ", Style::default().fg(Color::Yellow)),
-            Span::raw("Edit prompt (alias)"),
-        ]),
-        Line::from(Span::styled(
-            " ── Skills (3) ──────────────────",
-            Style::default().fg(Color::DarkGray),
-        )),
-        Line::from(vec![
-            Span::styled("  i/Enter    ", Style::default().fg(Color::Yellow)),
-            Span::raw("Install skill"),
-        ]),
-        Line::from(vec![
-            Span::styled("  u          ", Style::default().fg(Color::Yellow)),
-            Span::raw("Update skill"),
-        ]),
-        Line::from(vec![
-            Span::styled("  r          ", Style::default().fg(Color::Yellow)),
-            Span::raw("Remove skill"),
-        ]),
-        Line::from(vec![
-            Span::styled("  g          ", Style::default().fg(Color::Yellow)),
-            Span::raw("Open GitHub source"),
-        ]),
-        Line::from(Span::styled(
-            " ── Sync (4) ────────────────────",
-            Style::default().fg(Color::DarkGray),
-        )),
-        Line::from(vec![
-            Span::styled("  s/Enter    ", Style::default().fg(Color::Yellow)),
-            Span::raw("Execute selected sync mapping"),
-        ]),
-        Line::from(vec![
-            Span::styled("  S          ", Style::default().fg(Color::Yellow)),
-            Span::raw("Execute all sync mappings"),
-        ]),
-        Line::from(Span::styled(
-            " ── Audit (5) ───────────────────",
-            Style::default().fg(Color::DarkGray),
-        )),
-        Line::from(vec![
-            Span::styled("  r          ", Style::default().fg(Color::Yellow)),
-            Span::raw("Run audit (auto-runs on first entry)"),
-        ]),
-        Line::from(vec![
-            Span::styled("  f          ", Style::default().fg(Color::Yellow)),
-            Span::raw("Cycle severity filter"),
-        ]),
-        Line::from(vec![
-            Span::styled("  Enter      ", Style::default().fg(Color::Yellow)),
-            Span::raw("Open finding file / show remediation"),
-        ]),
-        Line::from(Span::styled(
-            " ── General ─────────────────────",
-            Style::default().fg(Color::DarkGray),
-        )),
-        Line::from(vec![
-            Span::styled("  ?          ", Style::default().fg(Color::Yellow)),
-            Span::raw("Toggle this help"),
-        ]),
-        Line::from(vec![
-            Span::styled("  q          ", Style::default().fg(Color::Yellow)),
-            Span::raw("Quit"),
-        ]),
-        Line::from(""),
-        Line::from(Span::styled(
-            "  Press ? or Esc to close",
-            Style::default().fg(Color::DarkGray),
-        )),
-    ];
+        )));
+        for binding in crate::ui::keymap::bindings_for_tab(tab_index, &app) {
+            if binding.when.is_none() {
+                continue;
+            }
+            help_text.push(Line::from(vec![
+                Span::styled(
+                    format!("  {:<10}", binding.key),
+                    Style::default().fg(Color::Yellow),
+                ),
+                Span::raw(binding.label),
+            ]));
+        }
+    }
+
+    help_text.push(Line::from(Span::styled(
+        " ── General ─────────────────────",
+        Style::default().fg(Color::DarkGray),
+    )));
+    for binding in crate::ui::keymap::global_bindings() {
+        help_text.push(Line::from(vec![
+            Span::styled(
+                format!("  {:<10}", binding.key),
+                Style::default().fg(Color::Yellow),
+            ),
+            Span::raw(binding.label),
+        ]));
+    }
+    help_text.push(Line::from(""));
+    help_text.push(Line::from(Span::styled(
+        "  Press ? or Esc to close",
+        Style::default().fg(Color::DarkGray),
+    )));
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
     let width = 52.min(area.width);
-    let height = 34.min(area.height);
+    let height = (help_text.len() as u16 + 2).min(area.height);
     let x = (area.width.saturating_sub(width)) / 2;
     let y = (area.height.saturating_sub(height)) / 2;
     let popup_area = Rect::new(x, y, width, height);

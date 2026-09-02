@@ -1349,7 +1349,12 @@ impl App {
         self.refresh_sync_plan();
 
         if errors.is_empty() {
-            self.status_message = Some(success_message);
+            let hint = if self.audit_loaded {
+                " · press r in Audit tab to re-audit"
+            } else {
+                ""
+            };
+            self.status_message = Some(format!("{success_message}{hint}"));
         } else {
             self.error_message = Some(format!(
                 "Executed {}, {} failed: {}",

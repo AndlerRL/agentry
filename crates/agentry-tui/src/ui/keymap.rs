@@ -58,7 +58,7 @@ fn scoped(when: fn(&App) -> bool, key: &str, label: &str, action: TuiAction) -> 
     }
 }
 
-fn global_bindings() -> Vec<KeyBinding> {
+pub fn global_bindings() -> Vec<KeyBinding> {
     vec![
         binding("q", "Quit", TuiAction::Quit),
         binding("?", "Help", TuiAction::Help),
@@ -219,9 +219,26 @@ pub fn bar_lines(tab_index: usize, app: &App, width: usize) -> Vec<Line<'static>
     lines.into_iter().take(2).map(Line::from).collect()
 }
 
+pub fn confirm_bar_lines() -> Vec<Line<'static>> {
+    let entries = [("y", "Confirm"), ("n", "Cancel"), ("Esc", "Cancel")];
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    for (key, label) in entries {
+        spans.push(Span::styled(
+            key.to_string(),
+            Style::default().fg(Color::Yellow),
+        ));
+        spans.push(Span::styled(" ", Style::default()));
+        spans.push(Span::styled(
+            label.to_string(),
+            Style::default().fg(Color::DarkGray),
+        ));
+        spans.push(Span::styled(" · ", Style::default().fg(Color::DarkGray)));
+    }
+    vec![Line::from(spans)]
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::*;
 
     const GLOBAL_KEYS: [&str; 13] = [
@@ -240,10 +257,10 @@ mod tests {
     fn bindings_for_tab_non_empty_for_all_tabs() {
         let app = App::new();
         let expected_totals = [23, 17, 18, 16, 16];
-        for tab in 0..5 {
+        for (tab, expected) in expected_totals.iter().enumerate() {
             let bindings = bindings_for_tab(tab, &app);
             assert!(!bindings.is_empty(), "tab {tab} has no bindings");
-            assert_eq!(bindings.len(), expected_totals[tab], "tab {tab} count");
+            assert_eq!(bindings.len(), *expected, "tab {tab} count");
         }
     }
 
