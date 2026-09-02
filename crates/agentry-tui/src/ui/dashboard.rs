@@ -109,7 +109,9 @@ pub fn draw_dashboard(f: &mut Frame, app: &App) {
     f.render_widget(status_bar, chunks[2]);
 
     f.render_widget(ratatui::widgets::Clear, chunks[3]);
-    let keymap_lines = if app.delete_confirm.is_some()
+    let keymap_lines = if app.new_prompt_name.is_some() {
+        crate::ui::keymap::input_bar_lines()
+    } else if app.delete_confirm.is_some()
         || app.skill_confirm.is_some()
         || app.agent_confirm.is_some()
         || app.sync_confirm.is_some()
@@ -529,7 +531,7 @@ fn draw_agent_detail_enhanced(f: &mut Frame, app: &App, area: Rect) {
                     }
                 }
                 agent_lines.push(Line::from(Span::styled(
-                    "  Enter: edit first doc  n: New workspace  c: openclaw setup  a: Add agent",
+                    "  Enter: edit first doc  c: Create workspace (openclaw setup)  a: Add agent",
                     Style::default().fg(Color::Yellow),
                 )));
             }
@@ -1048,8 +1050,13 @@ fn draw_skill_detail(f: &mut Frame, app: &App, area: Rect) {
 
 fn draw_sync_list(f: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = if app.sync_results.is_empty() {
+        let empty_label = if app.sync_loaded {
+            "  Nothing to sync"
+        } else {
+            "  Loading sync plan..."
+        };
         vec![ListItem::new(Line::from(Span::styled(
-            "  Loading sync plan...",
+            empty_label,
             Style::default().fg(Color::DarkGray),
         )))]
     } else {
@@ -1211,11 +1218,28 @@ fn draw_sync_detail(f: &mut Frame, app: &App, area: Rect) {
                 )),
             ]
         }
+    } else if app.sync_loaded {
+        vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Nothing to sync",
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Shows where each prompt will be synced",
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(Span::styled(
+                "  across all detected agents.",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ]
     } else {
         vec![
             Line::from(""),
             Line::from(Span::styled(
-                "  Sync plan is loading...",
+                "  Loading sync plan...",
                 Style::default().fg(Color::DarkGray),
             )),
             Line::from(""),

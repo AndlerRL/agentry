@@ -31,6 +31,7 @@ pub enum TuiAction {
     MethodPrev,
     MethodNext,
     ListVersions,
+    CancelVersion,
 }
 
 pub struct KeyBinding {
@@ -73,6 +74,12 @@ pub fn global_bindings() -> Vec<KeyBinding> {
         binding("3", "Skills", TuiAction::JumpTab(2)),
         binding("4", "Sync", TuiAction::JumpTab(3)),
         binding("5", "Audit", TuiAction::JumpTab(4)),
+        scoped(
+            |app: &App| app.version_list.is_some(),
+            "Esc",
+            "Cancel version",
+            TuiAction::CancelVersion,
+        ),
     ]
 }
 
@@ -88,7 +95,6 @@ fn agents_bindings() -> Vec<KeyBinding> {
         scoped(when, "v", "Versions", TuiAction::ListVersions),
         scoped(when, "Left", "Prev method", TuiAction::MethodPrev),
         scoped(when, "Right", "Next method", TuiAction::MethodNext),
-        scoped(openclaw, "n", "New workspace", TuiAction::New),
         scoped(
             openclaw,
             "c",
@@ -220,7 +226,14 @@ pub fn bar_lines(tab_index: usize, app: &App, width: usize) -> Vec<Line<'static>
 }
 
 pub fn confirm_bar_lines() -> Vec<Line<'static>> {
-    let entries = [("y", "Confirm"), ("n", "Cancel"), ("Esc", "Cancel")];
+    bar_from_entries(&[("y", "Confirm"), ("n", "Cancel"), ("Esc", "Cancel")])
+}
+
+pub fn input_bar_lines() -> Vec<Line<'static>> {
+    bar_from_entries(&[("Enter", "Commit"), ("Esc", "Cancel")])
+}
+
+fn bar_from_entries(entries: &[(&str, &str)]) -> Vec<Line<'static>> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     for (key, label) in entries {
         spans.push(Span::styled(
@@ -256,7 +269,7 @@ mod tests {
     #[test]
     fn bindings_for_tab_non_empty_for_all_tabs() {
         let app = App::new();
-        let expected_totals = [23, 17, 18, 16, 16];
+        let expected_totals = [23, 18, 19, 17, 17];
         for (tab, expected) in expected_totals.iter().enumerate() {
             let bindings = bindings_for_tab(tab, &app);
             assert!(!bindings.is_empty(), "tab {tab} has no bindings");
@@ -333,6 +346,7 @@ mod tests {
             (
                 0,
                 vec![
+                    ("Esc", TuiAction::CancelVersion),
                     ("Enter", TuiAction::Enter),
                     ("Enter", TuiAction::Enter),
                     ("u", TuiAction::Update),
@@ -340,7 +354,6 @@ mod tests {
                     ("v", TuiAction::ListVersions),
                     ("Left", TuiAction::MethodPrev),
                     ("Right", TuiAction::MethodNext),
-                    ("n", TuiAction::New),
                     ("c", TuiAction::CreateWorkspace),
                     ("a", TuiAction::AddAgent),
                 ],
@@ -348,6 +361,7 @@ mod tests {
             (
                 1,
                 vec![
+                    ("Esc", TuiAction::CancelVersion),
                     ("Enter", TuiAction::Enter),
                     ("e", TuiAction::Edit),
                     ("n", TuiAction::New),
@@ -357,6 +371,7 @@ mod tests {
             (
                 2,
                 vec![
+                    ("Esc", TuiAction::CancelVersion),
                     ("Enter", TuiAction::Enter),
                     ("i", TuiAction::Insert),
                     ("u", TuiAction::Update),
@@ -367,6 +382,7 @@ mod tests {
             (
                 3,
                 vec![
+                    ("Esc", TuiAction::CancelVersion),
                     ("s", TuiAction::SyncExecuteSelected),
                     ("S", TuiAction::SyncExecuteAll),
                     ("Enter", TuiAction::SyncExecuteSelected),
@@ -375,6 +391,7 @@ mod tests {
             (
                 4,
                 vec![
+                    ("Esc", TuiAction::CancelVersion),
                     ("r", TuiAction::RunAudit),
                     ("f", TuiAction::CycleAuditFilter),
                     ("Enter", TuiAction::Enter),
@@ -409,6 +426,23 @@ mod tests {
     fn resolve_returns_none_for_unknown_key() {
         let app = App::new();
         assert_eq!(resolve(0, &app, "zzz"), None);
+    }
+
+    #[test]
+    fn resolve_esc_maps_cancel_version_only_when_version_list_loaded() {
+        let app = App::new();
+        for tab in 0..5 {
+            assert_eq!(resolve(tab, &app, "Esc"), None, "tab {tab}");
+        }
+        let mut picking = App::new();
+        picking.version_list = Some(vec!["1.0.0".to_string()]);
+        for tab in 0..5 {
+            assert_eq!(
+                resolve(tab, &picking, "Esc"),
+                Some(TuiAction::CancelVersion),
+                "tab {tab}"
+            );
+        }
     }
 
     #[test]
@@ -490,5 +524,57 @@ mod tests {
         for tab in 0..5 {
             let _ = bar_lines(tab, &app, 0);
         }
+    }
+
+    #[test]
+    fn bar_lines_spans_exactly_match_filtered_bindings_for_all_tabs() {
+        for tab in 0..5 {
+            let app = fixture_app();
+            let lines = bar_lines(tab, &app, 200);
+            assert!(lines.len() <= 2, "tab {tab}: too many lines");
+
+            let bar_pairs: Vec<(String, String)> = lines
+                .iter()
+                .flat_map(|l| l.spans.chunks(4))
+                .map(|c| {
+                    (
+                        c[0].content.to_string(),
+                        c[1].content.to_string() + &c[2].content,
+                    )
+                })
+                .collect();
+
+            let bindings = bindings_for_tab(tab, &app);
+            let mut nav: Vec<&KeyBinding> = Vec::new();
+            let mut rest: Vec<&KeyBinding> = Vec::new();
+            for b in bindings.iter().filter(|b| b.when.is_none_or(|f| f(&app))) {
+                if matches!(
+                    b.key.as_str(),
+                    "j" | "k" | "Up" | "Down" | "Tab" | "BackTab"
+                ) {
+                    nav.push(b);
+                } else {
+                    rest.push(b);
+                }
+            }
+            nav.extend(rest);
+
+            let expected: Vec<(String, String)> = nav
+                .into_iter()
+                .map(|b| (b.key.clone(), format!(" {}", b.label)))
+                .collect();
+
+            assert_eq!(bar_pairs.len(), expected.len(), "tab {tab}: item count");
+            assert_eq!(
+                bar_pairs, expected,
+                "tab {tab}: bar spans diverge from registry"
+            );
+        }
+    }
+
+    fn fixture_app() -> App {
+        let mut app = App::new();
+        app.sync_loaded = true;
+        app
     }
 }

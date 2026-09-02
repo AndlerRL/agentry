@@ -2,8 +2,6 @@ mod dashboard;
 mod intro;
 pub mod keymap;
 
-use ratatui::layout::Rect;
-
 pub use dashboard::draw_dashboard;
 pub use intro::draw_intro;
 
@@ -25,16 +23,6 @@ impl Tab {
         Tab::Audit,
     ];
 
-    pub fn _index(self) -> usize {
-        match self {
-            Tab::Agents => 0,
-            Tab::Prompts => 1,
-            Tab::Skills => 2,
-            Tab::Sync => 3,
-            Tab::Audit => 4,
-        }
-    }
-
     pub fn from_index(i: usize) -> Option<Tab> {
         Tab::ALL.get(i).copied()
     }
@@ -48,10 +36,4 @@ impl Tab {
             Tab::Audit => "Audit",
         }
     }
-}
-
-fn _centered_rect(area: Rect, width: u16, height: u16) -> Rect {
-    let x = area.x + (area.width.saturating_sub(width)) / 2;
-    let y = area.y + (area.height.saturating_sub(height)) / 2;
-    Rect::new(x, y, width.min(area.width), height.min(area.height))
 }

@@ -96,12 +96,10 @@ pub enum AppMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum SkillConfirmAction {
     Install(String),
     Remove(String),
     Update(String),
-    UpdateAll,
 }
 
 /// Sync execution pending confirmation.
@@ -139,6 +137,36 @@ impl AgentConfirmAction {
 }
 
 const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+fn is_safe_version(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '+'))
+}
+
+fn parse_versions(stdout: &str, method: &agentry_core::models::InstallMethod) -> Vec<String> {
+    match method {
+        agentry_core::models::InstallMethod::Brew { .. } => {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(stdout) {
+                let v = val["versions"]["stable"].as_str().unwrap_or("unknown");
+                vec![v.to_string()]
+            } else {
+                vec!["parse error".into()]
+            }
+        }
+        agentry_core::models::InstallMethod::Npm { .. } => {
+            serde_json::from_str::<Vec<String>>(stdout).unwrap_or_default()
+        }
+        _ => stdout
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect(),
+    }
+    .into_iter()
+    .filter(|v| is_safe_version(v))
+    .collect()
+}
 
 impl App {
     pub fn new() -> Self {
@@ -538,19 +566,12 @@ impl App {
             Some(TuiAction::MethodPrev) => self.method_prev(),
             Some(TuiAction::MethodNext) => self.method_next(),
             Some(TuiAction::ListVersions) => self.on_list_versions(),
-            None => match key.code {
-                KeyCode::Char('s') => self.execute_selected_sync(),
-                KeyCode::Char('u') => self.on_update(),
-                KeyCode::Right => self.method_next(),
-                KeyCode::Esc => {
-                    if self.version_list.is_some() {
-                        self.version_list = None;
-                        self.version_selected = 0;
-                        self.status_message = Some("Version selection cancelled".into());
-                    }
-                }
-                _ => {}
-            },
+            Some(TuiAction::CancelVersion) => {
+                self.version_list = None;
+                self.version_selected = 0;
+                self.status_message = Some("Version selection cancelled".into());
+            }
+            None => {}
         }
         Ok(())
     }
@@ -637,13 +658,16 @@ impl App {
             .and_then(|v| v.get(self.version_selected))
             .cloned();
         match version {
-            Some(v) => {
+            Some(v) if is_safe_version(&v) => {
                 self.agent_confirm = Some(AgentConfirmAction::Install {
                     agent_id: agent.spec.id.clone(),
                     method: method.clone(),
                     version: Some(v.clone()),
                 });
                 self.status_message = Some(format!("Install {} {}? (y/n)", agent.spec.name, v));
+            }
+            Some(_) => {
+                self.error_message = Some("Invalid version string".into());
             }
             None => {
                 self.status_message = Some("No version selected".into());
@@ -1103,6 +1127,10 @@ impl App {
     fn on_enter(&mut self) {
         match self.tab_index {
             0 => {
+                if self.version_list.is_some() {
+                    self.confirm_selected_version();
+                    return;
+                }
                 if self.selected_agent_is_openclaw() {
                     let doc_path = self.openclaw_default_doc_path();
                     match doc_path {
@@ -1111,10 +1139,6 @@ impl App {
                             self.status_message = Some("No docs in the default workspace".into())
                         }
                     }
-                    return;
-                }
-                if self.version_list.is_some() {
-                    self.confirm_selected_version();
                     return;
                 }
                 // Agents tab - install via selected method
@@ -1453,27 +1477,7 @@ impl App {
                 {
                     Ok(output) if output.status.success() => {
                         let stdout = String::from_utf8_lossy(&output.stdout);
-                        // Parse versions depending on the method type
-                        let versions: Vec<String> = match method {
-                            agentry_core::models::InstallMethod::Brew { .. } => {
-                                // brew info --json=v2 returns JSON
-                                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&stdout)
-                                {
-                                    let v = val["versions"]["stable"].as_str().unwrap_or("unknown");
-                                    vec![v.to_string()]
-                                } else {
-                                    vec!["parse error".into()]
-                                }
-                            }
-                            agentry_core::models::InstallMethod::Npm { .. } => {
-                                serde_json::from_str::<Vec<String>>(&stdout).unwrap_or_default()
-                            }
-                            _ => stdout
-                                .lines()
-                                .map(|l| l.trim().to_string())
-                                .filter(|l| !l.is_empty())
-                                .collect(),
-                        };
+                        let versions = parse_versions(&stdout, method);
                         if versions.is_empty() {
                             self.version_list_error = Some("No versions found".into());
                         } else {
@@ -1714,15 +1718,6 @@ impl App {
                         self.status_message = Some(format!("Update error: {}", e));
                     }
                 }
-            }
-            SkillConfirmAction::UpdateAll => {
-                let home = self.home_dir.clone();
-                let dirs = self.agent_skills_dirs.clone();
-                let results = agentry_skills::install::update_all_skills(&home, &dirs);
-                let ok_count = results.iter().filter(|r| r.success).count();
-                self.status_message =
-                    Some(format!("Updated {}/{} skills", ok_count, results.len()));
-                self.discover_skills(); // Refresh
             }
         }
     }
@@ -2162,10 +2157,7 @@ mod tests {
             crate::ui::keymap::resolve(0, &app, "c"),
             Some(TuiAction::CreateWorkspace)
         );
-        assert_eq!(
-            crate::ui::keymap::resolve(0, &app, "n"),
-            Some(TuiAction::New)
-        );
+        assert_eq!(crate::ui::keymap::resolve(0, &app, "n"), None);
         press(&mut app, KeyCode::Char('a'));
         assert_eq!(
             app.status_message.as_deref(),
@@ -2497,6 +2489,21 @@ mod tests {
     }
 
     #[test]
+    fn u_s_right_inert_off_tab_without_status() {
+        for tab in [1, 3, 4] {
+            let mut app = App::new();
+            app.tab_index = tab;
+            press(&mut app, KeyCode::Char('u'));
+            press(&mut app, KeyCode::Char('s'));
+            press(&mut app, KeyCode::Right);
+            assert!(app.status_message.is_none(), "tab {tab}");
+            assert!(app.agent_confirm.is_none());
+            assert!(app.sync_confirm.is_none());
+            assert_eq!(app.method_selected, 0);
+        }
+    }
+
+    #[test]
     fn w_key_inert_on_all_tabs() {
         for tab in 0..5 {
             let mut app = App::new();
@@ -2580,6 +2587,16 @@ mod tests {
     }
 
     #[test]
+    fn esc_silent_without_version_list() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![version_flow_agent()];
+        press(&mut app, KeyCode::Esc);
+        assert!(app.status_message.is_none());
+        assert!(app.agent_confirm.is_none());
+    }
+
+    #[test]
     fn jk_moves_version_selection_while_loaded() {
         let mut app = App::new();
         app.tab_index = 0;
@@ -2598,5 +2615,68 @@ mod tests {
         press(&mut app, KeyCode::Char('k'));
         assert_eq!(app.version_selected, 1);
         assert_eq!(app.list_selected, 0, "agent list must not move");
+    }
+
+    #[test]
+    fn parse_versions_filters_unsafe_strings() {
+        let method = agentry_core::models::InstallMethod::Npm {
+            package: "codex".to_string(),
+        };
+        let raw = r#"["1.2.3","1;rm -rf /","$(whoami)","1`id`","1 2","a_b-c.d+e",""]"#;
+        let parsed = parse_versions(raw, &method);
+        assert_eq!(parsed, vec!["1.2.3".to_string(), "a_b-c.d+e".to_string()]);
+    }
+
+    #[test]
+    fn parse_versions_rejects_unsafe_brew_stable() {
+        let method = agentry_core::models::InstallMethod::Brew {
+            formula: "codex".to_string(),
+            cask: false,
+        };
+        let raw = r#"{"versions":{"stable":"1.2;evil"}}"#;
+        assert!(parse_versions(raw, &method).is_empty());
+    }
+
+    #[test]
+    fn parse_versions_passes_normal_version() {
+        let method = agentry_core::models::InstallMethod::Other {
+            description: "x".to_string(),
+            install_cmd: "x".to_string(),
+        };
+        let parsed = parse_versions("1.2.3\n2.0.0-rc.1\nbad version\n", &method);
+        assert_eq!(parsed, vec!["1.2.3".to_string(), "2.0.0-rc.1".to_string()]);
+    }
+
+    #[test]
+    fn confirm_refuses_unsafe_version() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![version_flow_agent()];
+        app.version_list = Some(vec!["1.2.3;rm -rf /".to_string()]);
+        app.version_selected = 0;
+
+        press(&mut app, KeyCode::Enter);
+
+        assert!(app.agent_confirm.is_none(), "confirm must not be created");
+        assert!(app.version_list.is_none(), "picker must close");
+        assert_eq!(app.error_message.as_deref(), Some("Invalid version string"));
+    }
+
+    #[test]
+    fn confirm_allows_safe_version_with_special_chars() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![version_flow_agent()];
+        app.version_list = Some(vec!["1.2.3-beta+build_1".to_string()]);
+        app.version_selected = 0;
+
+        press(&mut app, KeyCode::Enter);
+
+        match app.agent_confirm {
+            Some(AgentConfirmAction::Install { ref version, .. }) => {
+                assert_eq!(version.as_deref(), Some("1.2.3-beta+build_1"));
+            }
+            other => panic!("expected Install confirm, got {:?}", other),
+        }
     }
 }

@@ -119,8 +119,7 @@ A persistent keymap bar is always visible at the bottom of the TUI, showing the 
 | Agents | `r` | Remove agent |
 | Agents | `v` | List versions (`Enter` installs the selected version) |
 | Agents | `←` / `→` | Cycle install method |
-| Agents (openclaw) | `c` | Create workspace |
-| Agents (openclaw) | `n` | New workspace |
+| Agents (openclaw) | `c` | Create workspace (runs `openclaw setup`) |
 | Agents (openclaw) | `a` | Add agent (shows the `openclaw agents add` command) |
 | Prompts | `Enter` / `e` | Edit prompt in `$EDITOR` |
 | Prompts | `n` | New prompt |
@@ -210,7 +209,6 @@ agentry-tui
 ├── agentry-sync
 ├── agentry-skills
 ├── agentry-openclaw
-├── agentry-acp
 └── agentry-audit
 
 agentry-agents ──> agentry-core
