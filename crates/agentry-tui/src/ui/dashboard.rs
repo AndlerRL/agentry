@@ -114,7 +114,7 @@ pub fn draw_dashboard(f: &mut Frame, app: &App) {
     } else if app.delete_confirm.is_some()
         || app.skill_confirm.is_some()
         || app.agent_confirm.is_some()
-        || app.sync_confirm.is_some()
+        || app.harness_confirm.is_some()
     {
         crate::ui::keymap::confirm_bar_lines()
     } else {

@@ -24,6 +24,23 @@ pub struct OpenClawState {
     pub installed: bool,
 }
 
+fn build_harness_registry() -> agentry_harness::HarnessRegistry {
+    let mut registry = agentry_harness::HarnessRegistry::new();
+    registry.register(Box::new(
+        agentry_harness::actions::sync_action::SyncExecuteAction,
+    ));
+    registry.register(Box::new(
+        agentry_harness::actions::audit_action::AuditRunAction,
+    ));
+    registry.register(Box::new(
+        agentry_harness::actions::fix_action::FixApplyAction,
+    ));
+    registry.register(Box::new(
+        agentry_harness::actions::fix_action::FixApplyAllAction,
+    ));
+    registry
+}
+
 /// Application state machine: Intro → Dashboard → (various tabs) → Quit
 pub struct App {
     /// Current mode
@@ -68,8 +85,6 @@ pub struct App {
     pub show_help: bool,
     /// Skill action pending confirmation
     pub skill_confirm: Option<SkillConfirmAction>,
-    /// Sync execution pending confirmation
-    pub sync_confirm: Option<SyncConfirmAction>,
     /// Error message to display in the status bar (cleared on next key press)
     pub error_message: Option<String>,
     /// Set to true after external editor exits — main loop calls terminal.clear()
@@ -86,6 +101,13 @@ pub struct App {
     pub version_list_error: Option<String>,
     pub audit_report: Option<agentry_audit::report::AuditReport>,
     pub audit_filter: Option<agentry_audit::report::Severity>,
+    pub harness: agentry_harness::HarnessRegistry,
+    pub harness_confirm: Option<HarnessPendingInvocation>,
+}
+
+pub struct HarnessPendingInvocation {
+    pub action_id: String,
+    pub input: agentry_harness::ActionInput,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,13 +122,6 @@ pub enum SkillConfirmAction {
     Install(String),
     Remove(String),
     Update(String),
-}
-
-/// Sync execution pending confirmation.
-#[derive(Debug, Clone)]
-pub enum SyncConfirmAction {
-    Selected(agentry_core::models::SyncMapping),
-    All(Vec<agentry_core::models::SyncMapping>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -201,7 +216,6 @@ impl App {
             status_message: None,
             show_help: false,
             skill_confirm: None,
-            sync_confirm: None,
             error_message: None,
             needs_terminal_clear: false,
             method_selected: 0,
@@ -211,6 +225,8 @@ impl App {
             version_list_error: None,
             audit_report: None,
             audit_filter: None,
+            harness: build_harness_registry(),
+            harness_confirm: None,
         }
     }
 
@@ -445,17 +461,18 @@ impl App {
             return Ok(());
         }
 
-        // Handle sync confirm action
-        if self.sync_confirm.is_some() {
+        // Handle harness confirm action
+        if self.harness_confirm.is_some() {
             match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
-                    let action = self.sync_confirm.take();
-                    if let Some(action) = action {
-                        self.execute_sync_action(action);
+                    let pending = self.harness_confirm.take();
+                    if let Some(pending) = pending {
+                        self.invoke_harness(pending);
                     }
                 }
                 KeyCode::Char('n') | KeyCode::Esc => {
-                    self.sync_confirm = None;
+                    self.harness_confirm = None;
+                    self.status_message = Some("Cancelled".into());
                 }
                 _ => {}
             }
@@ -570,6 +587,15 @@ impl App {
                 self.version_list = None;
                 self.version_selected = 0;
                 self.status_message = Some("Version selection cancelled".into());
+            }
+            Some(TuiAction::Harness(invocation)) => {
+                let input = self.resolve_harness_input(&invocation);
+                match input {
+                    Ok(input) => self.prepare_harness(&invocation.action_id, input),
+                    Err(err) => {
+                        self.error_message = Some(err);
+                    }
+                }
             }
             None => {}
         }
@@ -1286,11 +1312,13 @@ impl App {
         }
         match self.selected_sync_mapping() {
             Some(mapping) if mapping.action != agentry_core::models::SyncAction::Skip => {
-                self.status_message = Some(format!(
-                    "Sync {} to {}? (y/n)",
-                    mapping.prompt_id, mapping.agent_id
-                ));
-                self.sync_confirm = Some(SyncConfirmAction::Selected(mapping));
+                self.prepare_harness(
+                    "sync.execute",
+                    agentry_harness::ActionInput::SyncExecute {
+                        prompt_id: None,
+                        mappings: vec![mapping],
+                    },
+                );
             }
             Some(_) => {
                 self.status_message = Some("Selected mapping is skipped".into());
@@ -1319,74 +1347,13 @@ impl App {
             self.status_message = Some("No executable sync mappings".into());
             return;
         }
-        let count = mappings.len();
-        self.sync_confirm = Some(SyncConfirmAction::All(mappings));
-        self.status_message = Some(format!("Execute {} sync mappings? (y/n)", count));
-    }
-
-    fn execute_sync_action(&mut self, action: SyncConfirmAction) {
-        let (success_message, grouped): (
-            String,
-            Vec<(String, Vec<agentry_core::models::SyncMapping>)>,
-        ) = match action {
-            SyncConfirmAction::Selected(mapping) => (
-                format!(
-                    "Synced {} to {}",
-                    mapping.prompt_id,
-                    mapping.destination.display()
-                ),
-                vec![(mapping.prompt_id.clone(), vec![mapping])],
-            ),
-            SyncConfirmAction::All(mappings) => {
-                let count = mappings.len();
-                let mut groups: std::collections::BTreeMap<String, Vec<_>> =
-                    std::collections::BTreeMap::new();
-                for m in mappings {
-                    groups.entry(m.prompt_id.clone()).or_default().push(m);
-                }
-                (
-                    format!("Executed {} mappings", count),
-                    groups.into_iter().collect(),
-                )
-            }
-        };
-
-        let mut executed = 0usize;
-        let mut errors: Vec<String> = Vec::new();
-        for (prompt_id, mappings) in &grouped {
-            let prompt = match self.prompts.iter().find(|p| &p.id == prompt_id) {
-                Some(p) => p.clone(),
-                None => {
-                    errors.push(format!("Prompt '{}' not found", prompt_id));
-                    continue;
-                }
-            };
-            for result in agentry_sync::executor::execute_sync(&prompt, mappings, false) {
-                if result.success {
-                    executed += 1;
-                } else {
-                    errors.push(format!("{}: {}", result.mapping.agent_id, result.message));
-                }
-            }
-        }
-
-        self.refresh_sync_plan();
-
-        if errors.is_empty() {
-            let hint = if self.audit_loaded {
-                " · press r in Audit tab to re-audit"
-            } else {
-                ""
-            };
-            self.status_message = Some(format!("{success_message}{hint}"));
-        } else {
-            self.error_message = Some(format!(
-                "Executed {}, {} failed: {}",
-                executed,
-                errors.len(),
-                errors.join("; ")
-            ));
-        }
+        self.prepare_harness(
+            "sync.execute",
+            agentry_harness::ActionInput::SyncExecute {
+                prompt_id: None,
+                mappings,
+            },
+        );
     }
 
     fn refresh_sync_plan(&mut self) {
@@ -1396,14 +1363,167 @@ impl App {
         self.sync_loaded = true;
     }
 
-    fn on_run_audit(&mut self) {
+    fn harness_context(&self) -> agentry_harness::HarnessContext {
+        agentry_harness::HarnessContext::new(
+            self.home_dir.clone(),
+            self.detected_agents.clone(),
+            self.prompts.clone(),
+        )
+        .with_report(self.audit_report.clone())
+    }
+
+    fn resolve_harness_input(
+        &self,
+        invocation: &crate::ui::keymap::HarnessInvocation,
+    ) -> Result<agentry_harness::ActionInput, String> {
+        match invocation.action_id.as_str() {
+            "fix.apply" => {
+                let check_id = self
+                    .selected_finding()
+                    .map(|f| f.check_id.clone())
+                    .ok_or_else(|| "Select a finding first".to_string())?;
+                Ok(agentry_harness::ActionInput::FixApply { check_id })
+            }
+            _ => serde_json::from_str(&invocation.input_json)
+                .map_err(|err| format!("invalid harness input: {err}")),
+        }
+    }
+
+    fn prepare_harness(&mut self, action_id: &str, input: agentry_harness::ActionInput) {
+        match self.harness.prepare(action_id, &input) {
+            Ok(pending) => match pending.confirmation {
+                agentry_harness::Confirmation::None => {
+                    self.invoke_harness(HarnessPendingInvocation {
+                        action_id: pending.action_id.to_string(),
+                        input,
+                    });
+                }
+                agentry_harness::Confirmation::Single | agentry_harness::Confirmation::PerItem => {
+                    self.status_message = Some(format!("{}? (y/n)", pending.describe));
+                    self.harness_confirm = Some(HarnessPendingInvocation {
+                        action_id: pending.action_id.to_string(),
+                        input,
+                    });
+                }
+                agentry_harness::Confirmation::Unsupported => {
+                    self.error_message =
+                        Some(format!("action '{action_id}' is not supported here"));
+                }
+            },
+            Err(err) => {
+                self.error_message = Some(err.to_string());
+            }
+        }
+    }
+
+    fn invoke_harness(&mut self, pending: HarnessPendingInvocation) {
+        let ctx = self.harness_context();
+        let action_id = pending.action_id.clone();
+        let result = match tokio::runtime::Handle::try_current() {
+            Ok(handle) => handle.block_on(self.harness.invoke_confirmed(
+                &ctx,
+                &action_id,
+                pending.input,
+            )),
+            Err(_) => {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("harness runtime");
+                rt.block_on(
+                    self.harness
+                        .invoke_confirmed(&ctx, &action_id, pending.input),
+                )
+            }
+        };
+        match result {
+            Ok(output) => self.apply_harness_output(&action_id, output),
+            Err(err) => {
+                self.error_message = Some(format!("{action_id} failed: {err}"));
+            }
+        }
+    }
+
+    fn apply_harness_output(&mut self, action_id: &str, output: agentry_harness::ActionOutput) {
+        match (action_id, output) {
+            ("sync.execute", agentry_harness::ActionOutput::SyncExecuted { applied, skipped }) => {
+                self.refresh_sync_plan();
+                let hint = if self.audit_loaded {
+                    " · press r in Audit tab to re-audit"
+                } else {
+                    ""
+                };
+                self.status_message = Some(format!(
+                    "Synced {applied} mappings ({skipped} skipped){hint}"
+                ));
+            }
+            ("audit.run", agentry_harness::ActionOutput::AuditCompleted(report)) => {
+                let finding_count = report.summary.total_findings;
+                self.audit_report = Some(report);
+                self.audit_loaded = true;
+                self.list_selected = 0;
+                self.status_message = Some(format!("Audit complete: {finding_count} findings"));
+            }
+            ("fix.apply", agentry_harness::ActionOutput::FixApplied(outcome)) => {
+                self.post_fix_feedback(vec![outcome]);
+            }
+            ("fix.apply_all", agentry_harness::ActionOutput::FixAppliedAll { outcomes }) => {
+                self.post_fix_feedback(outcomes);
+            }
+            _ => {
+                self.status_message = Some(format!("{action_id} completed"));
+            }
+        }
+    }
+
+    fn post_fix_feedback(&mut self, outcomes: Vec<agentry_audit::fix::FixOutcome>) {
+        let applied = outcomes.iter().filter(|o| o.success).count();
+        let attempted = outcomes.len();
+        for outcome in &outcomes {
+            if outcome.success {
+                if let Some(report) = &mut self.audit_report {
+                    agentry_audit::history::apply_feedback(
+                        report,
+                        &agentry_audit::history::load_history(&self.home_dir).unwrap_or_default(),
+                    );
+                }
+            }
+        }
+        self.rerun_audit_after_fix();
+        let remaining = self
+            .audit_report
+            .as_ref()
+            .map(|r| r.summary.total_findings)
+            .unwrap_or(0);
+        let failures: Vec<String> = outcomes
+            .iter()
+            .filter(|o| !o.success)
+            .map(|o| format!("{}: {}", o.check_id, o.message))
+            .collect();
+        if failures.is_empty() {
+            self.status_message = Some(format!(
+                "{applied} of {attempted} fixes applied; {remaining} findings remain"
+            ));
+        } else {
+            self.error_message = Some(format!(
+                "{applied} of {attempted} fixes applied; failures: {}",
+                failures.join("; ")
+            ));
+        }
+    }
+
+    fn rerun_audit_after_fix(&mut self) {
         let ctx = agentry_audit::engine::build_context(&self.home_dir, self.prompts.clone());
         let report = agentry_audit::engine::run_audit(&ctx);
-        let finding_count = report.summary.total_findings;
         self.audit_report = Some(report);
         self.audit_loaded = true;
-        self.list_selected = 0;
-        self.status_message = Some(format!("Audit complete: {} findings", finding_count));
+    }
+
+    fn on_run_audit(&mut self) {
+        self.prepare_harness(
+            "audit.run",
+            agentry_harness::ActionInput::AuditRun { agent_id: None },
+        );
     }
 
     fn on_edit(&mut self) {
@@ -2281,19 +2401,19 @@ mod tests {
         let dest = app.sync_results[0].mapping.destination.clone();
         app.list_selected = 1;
         press(&mut app, KeyCode::Char('s'));
-        assert!(app.sync_confirm.is_some());
-        assert_eq!(
-            app.status_message.as_deref(),
-            Some("Sync alpha to claude-code? (y/n)")
-        );
+        assert!(app.harness_confirm.is_some());
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|m| m.starts_with("sync 'alpha' to claude-code (")));
 
         press(&mut app, KeyCode::Char('y'));
-        assert!(app.sync_confirm.is_none());
+        assert!(app.harness_confirm.is_none());
         assert!(dest.exists());
-        assert_eq!(
-            app.status_message.as_deref(),
-            Some(format!("Synced alpha to {}", dest.display()).as_str())
-        );
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|m| m.starts_with("Synced 1 mappings")));
         assert_eq!(
             app.sync_results[0].mapping.status,
             agentry_core::models::SyncStatus::UpToDate
@@ -2305,9 +2425,13 @@ mod tests {
     #[test]
     fn sync_confirm_cancelled_with_n() {
         let (mut app, tmp) = sync_app("cancel");
-        app.sync_confirm = Some(SyncConfirmAction::All(Vec::new()));
+        app.load_sync_plan();
+        app.sync_loaded = true;
+        app.list_selected = 1;
+        press(&mut app, KeyCode::Char('s'));
+        assert!(app.harness_confirm.is_some());
         press(&mut app, KeyCode::Char('n'));
-        assert!(app.sync_confirm.is_none());
+        assert!(app.harness_confirm.is_none());
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -2329,25 +2453,25 @@ mod tests {
         app.list_selected = 1;
         press(&mut app, KeyCode::Char('S'));
         let expected = app.sync_results.len() - skip_count;
-        match &app.sync_confirm {
-            Some(SyncConfirmAction::All(mappings)) => {
-                assert!(mappings
-                    .iter()
-                    .all(|m| m.action != agentry_core::models::SyncAction::Skip));
-                assert_eq!(mappings.len(), expected);
-                assert_eq!(
-                    app.status_message.as_deref(),
-                    Some(format!("Execute {} sync mappings? (y/n)", expected).as_str())
-                );
-            }
-            _ => panic!("expected All confirm"),
-        }
-
-        press(&mut app, KeyCode::Char('y'));
+        assert!(app.harness_confirm.is_some());
+        let pending = app.harness_confirm.as_ref().unwrap();
+        let agentry_harness::ActionInput::SyncExecute { mappings, .. } = &pending.input else {
+            panic!("expected SyncExecute input");
+        };
+        assert!(mappings
+            .iter()
+            .all(|m| m.action != agentry_core::models::SyncAction::Skip));
+        assert_eq!(mappings.len(), expected);
         assert_eq!(
             app.status_message.as_deref(),
-            Some(format!("Executed {} mappings", expected).as_str())
+            Some(format!("execute {} sync mappings? (y/n)", expected).as_str())
         );
+
+        press(&mut app, KeyCode::Char('y'));
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|m| m.starts_with(&format!("Synced {expected} mappings"))));
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -2356,7 +2480,7 @@ mod tests {
     fn execute_selected_skips_skip_action_and_guards_plan() {
         let (mut app, tmp) = sync_app("skip-guard");
         app.execute_selected_sync();
-        assert!(app.sync_confirm.is_none());
+        assert!(app.harness_confirm.is_none());
         assert_eq!(
             app.status_message.as_deref(),
             Some("Sync plan not loaded yet")
@@ -2373,7 +2497,7 @@ mod tests {
             .expect("fixture has a Skip mapping");
         app.list_selected = skip_row + 1;
         app.execute_selected_sync();
-        assert!(app.sync_confirm.is_none());
+        assert!(app.harness_confirm.is_none());
         assert_eq!(
             app.status_message.as_deref(),
             Some("Selected mapping is skipped")
@@ -2389,7 +2513,7 @@ mod tests {
         app.sync_loaded = true;
         app.list_selected = 1;
         press(&mut app, KeyCode::Enter);
-        assert!(app.sync_confirm.is_some());
+        assert!(app.harness_confirm.is_some());
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -2424,6 +2548,168 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&app.home_dir);
+    }
+
+    fn fixable_finding(check_id: &str, path: std::path::PathBuf) -> AuditFinding {
+        AuditFinding {
+            check_id: check_id.to_string(),
+            severity: Severity::Warning,
+            category: FindingCategory::Config,
+            agent_id: None,
+            message: format!("finding {check_id}"),
+            remediation: "run the fix".to_string(),
+            auto_fixable: true,
+            fix: Some(agentry_audit::report::FixAction::FileRemove { path }),
+            evidence: None,
+        }
+    }
+
+    fn fix_app(name: &str, findings: Vec<AuditFinding>) -> (App, std::path::PathBuf) {
+        let tmp = std::env::temp_dir().join(format!("agentry-fix-test-{}", name));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let mut app = audit_app(report_with(findings));
+        app.home_dir = tmp.clone();
+        (app, tmp)
+    }
+
+    #[test]
+    fn fix_key_a_prepares_confirm_and_applies_through_harness() {
+        let target = std::env::temp_dir()
+            .join(format!("agentry-fix-key-a-{}", std::process::id()))
+            .join("stale.md");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, "x").unwrap();
+        let (mut app, tmp) = fix_app(
+            "fix-a",
+            vec![fixable_finding("orphan_cleanup", target.clone())],
+        );
+        app.list_selected = 1;
+
+        press(&mut app, KeyCode::Char('a'));
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|m| m.starts_with("apply fix for orphan_cleanup")));
+        assert!(app.harness_confirm.is_some());
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|m| m.starts_with("apply fix for orphan_cleanup")));
+
+        press(&mut app, KeyCode::Char('y'));
+        assert!(app.harness_confirm.is_none());
+        assert!(!target.exists(), "fix must have removed the file");
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|m| m.contains("1 of 1 fixes applied")));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn fix_key_a_cancelled_with_n() {
+        let target = std::env::temp_dir()
+            .join(format!("agentry-fix-key-n-{}", std::process::id()))
+            .join("stale.md");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, "x").unwrap();
+        let (mut app, tmp) = fix_app(
+            "fix-n",
+            vec![fixable_finding("orphan_cleanup", target.clone())],
+        );
+        app.list_selected = 1;
+
+        press(&mut app, KeyCode::Char('a'));
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|m| m.starts_with("apply fix for orphan_cleanup")));
+        assert!(app.harness_confirm.is_some());
+        press(&mut app, KeyCode::Char('n'));
+        assert!(app.harness_confirm.is_none());
+        assert!(target.exists(), "cancelled fix must not touch the file");
+        assert_eq!(app.status_message.as_deref(), Some("Cancelled"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn fix_key_a_gated_on_fixable_selection() {
+        let (mut app, tmp) = fix_app("fix-gate", vec![finding(Severity::Info, "plain.one")]);
+        app.list_selected = 1;
+
+        press(&mut app, KeyCode::Char('a'));
+        assert!(app.harness_confirm.is_none());
+        assert!(app.status_message.is_none() || app.error_message.is_none());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn fix_key_A_applies_all_through_harness() {
+        let dir = std::env::temp_dir().join(format!("agentry-fix-key-all-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let first = dir.join("first.md");
+        let second = dir.join("second.md");
+        std::fs::write(&first, "1").unwrap();
+        std::fs::write(&second, "2").unwrap();
+        let (mut app, tmp) = fix_app(
+            "fix-all",
+            vec![
+                fixable_finding("cleanup_one", first.clone()),
+                fixable_finding("cleanup_two", second.clone()),
+            ],
+        );
+
+        press(&mut app, KeyCode::Char('A'));
+        assert!(app.harness_confirm.is_some());
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|m| m.starts_with("apply all auto-fixable findings")));
+
+        press(&mut app, KeyCode::Char('y'));
+        assert!(!first.exists());
+        assert!(!second.exists());
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|m| m.contains("2 of 2 fixes applied")));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn fix_apply_reruns_audit_and_finding_disappears() {
+        let target = std::env::temp_dir()
+            .join(format!("agentry-fix-reaudit-{}", std::process::id()))
+            .join("stale.md");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, "x").unwrap();
+        let (mut app, tmp) = fix_app(
+            "fix-reaudit",
+            vec![fixable_finding("orphan_cleanup", target.clone())],
+        );
+        app.list_selected = 1;
+
+        press(&mut app, KeyCode::Char('a'));
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|m| m.starts_with("apply fix for orphan_cleanup")));
+        press(&mut app, KeyCode::Char('y'));
+
+        let report = app.audit_report.as_ref().expect("re-audit ran");
+        let still_present = report
+            .agents
+            .iter()
+            .flat_map(|a| a.findings.iter())
+            .chain(report.global_findings.iter())
+            .any(|f| f.check_id == "orphan_cleanup");
+        assert!(!still_present, "re-audit must reflect the applied fix");
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -2498,7 +2784,7 @@ mod tests {
             press(&mut app, KeyCode::Right);
             assert!(app.status_message.is_none(), "tab {tab}");
             assert!(app.agent_confirm.is_none());
-            assert!(app.sync_confirm.is_none());
+            assert!(app.harness_confirm.is_none());
             assert_eq!(app.method_selected, 0);
         }
     }

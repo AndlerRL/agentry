@@ -32,6 +32,23 @@ pub enum TuiAction {
     MethodNext,
     ListVersions,
     CancelVersion,
+    Harness(HarnessInvocation),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HarnessInvocation {
+    pub action_id: String,
+    pub input_json: String,
+}
+
+impl HarnessInvocation {
+    pub fn new(action_id: &str, input: &agentry_harness::ActionInput) -> Self {
+        let input_json = serde_json::to_string(input).unwrap_or_default();
+        Self {
+            action_id: action_id.to_string(),
+            input_json,
+        }
+    }
 }
 
 pub struct KeyBinding {
@@ -147,10 +164,43 @@ fn sync_bindings() -> Vec<KeyBinding> {
 
 fn audit_bindings() -> Vec<KeyBinding> {
     let when = |app: &App| app.tab_index == 4;
+    let fixable = |app: &App| {
+        app.tab_index == 4
+            && app
+                .selected_finding()
+                .is_some_and(|f| f.auto_fixable && f.fix.is_some())
+    };
+    let any_fixable = |app: &App| {
+        app.tab_index == 4
+            && app
+                .audit_report
+                .as_ref()
+                .is_some_and(|report| !agentry_audit::fix::fixable_findings(report).is_empty())
+    };
     vec![
         scoped(when, "r", "Run audit", TuiAction::RunAudit),
         scoped(when, "f", "Filter", TuiAction::CycleAuditFilter),
         scoped(when, "Enter", "Open finding", TuiAction::Enter),
+        scoped(
+            fixable,
+            "a",
+            "Apply fix",
+            TuiAction::Harness(HarnessInvocation::new(
+                "fix.apply",
+                &agentry_harness::ActionInput::FixApply {
+                    check_id: String::new(),
+                },
+            )),
+        ),
+        scoped(
+            any_fixable,
+            "A",
+            "Apply all fixes",
+            TuiAction::Harness(HarnessInvocation::new(
+                "fix.apply_all",
+                &agentry_harness::ActionInput::FixApplyAll,
+            )),
+        ),
     ]
 }
 
@@ -269,7 +319,7 @@ mod tests {
     #[test]
     fn bindings_for_tab_non_empty_for_all_tabs() {
         let app = App::new();
-        let expected_totals = [23, 18, 19, 17, 17];
+        let expected_totals = [23, 18, 19, 17, 19];
         for (tab, expected) in expected_totals.iter().enumerate() {
             let bindings = bindings_for_tab(tab, &app);
             assert!(!bindings.is_empty(), "tab {tab} has no bindings");
@@ -395,6 +445,22 @@ mod tests {
                     ("r", TuiAction::RunAudit),
                     ("f", TuiAction::CycleAuditFilter),
                     ("Enter", TuiAction::Enter),
+                    (
+                        "a",
+                        TuiAction::Harness(HarnessInvocation::new(
+                            "fix.apply",
+                            &agentry_harness::ActionInput::FixApply {
+                                check_id: String::new(),
+                            },
+                        )),
+                    ),
+                    (
+                        "A",
+                        TuiAction::Harness(HarnessInvocation::new(
+                            "fix.apply_all",
+                            &agentry_harness::ActionInput::FixApplyAll,
+                        )),
+                    ),
                 ],
             ),
         ];

@@ -8,6 +8,7 @@ members = [
     "crates/agentry-openclaw",
     "crates/agentry-acp",
     "crates/agentry-audit",
+    "crates/agentry-harness",
     "crates/agentry-tui",
     "tests/integration",
 ]
@@ -62,6 +63,7 @@ agentry-skills = { path = "crates/agentry-skills", version = "0.2.0" }
 agentry-openclaw = { path = "crates/agentry-openclaw", version = "0.2.0" }
 agentry-acp = { path = "crates/agentry-acp", version = "0.2.0" }
 agentry-audit = { path = "crates/agentry-audit", version = "0.2.0" }
+agentry-harness = { path = "crates/agentry-harness", version = "0.2.0" }
 
 # The profile that 'dist' will build with
 [profile.dist]

@@ -6,10 +6,11 @@ use agentry_core::discovery::discover_prompts;
 use agentry_core::models::{DetectedAgent, SyncAction, DEFAULT_PROJECT_DIR};
 use agentry_sync::executor::execute_sync;
 use agentry_sync::planner::plan_sync;
+use serde::{Deserialize, Serialize};
 
 use crate::report::{AuditFinding, AuditReport, FixAction};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FixOutcome {
     pub check_id: String,
     pub agent_id: Option<String>,
@@ -31,7 +32,13 @@ pub fn is_safe_shell_command(command: &str) -> bool {
 
 pub fn apply_fix(finding: &AuditFinding, home_dir: &Path) -> FixOutcome {
     let (success, message) = match &finding.fix {
-        Some(action) => execute_fix_action(action, &finding.check_id, home_dir),
+        Some(action) => {
+            if let Err(reason) = validate(action, home_dir) {
+                (false, reason)
+            } else {
+                execute_fix_action(action, &finding.check_id, home_dir)
+            }
+        }
         None => (
             false,
             format!("finding {} has no fix action", finding.check_id),
@@ -42,6 +49,39 @@ pub fn apply_fix(finding: &AuditFinding, home_dir: &Path) -> FixOutcome {
         agent_id: finding.agent_id.clone(),
         success,
         message,
+    }
+}
+
+pub fn validate(fix: &FixAction, home_dir: &Path) -> Result<(), String> {
+    match fix {
+        FixAction::ShellCommand { command, .. } => {
+            if is_safe_shell_command(command) {
+                Ok(())
+            } else {
+                Err(format!("refused unsafe shell command: {command}"))
+            }
+        }
+        FixAction::FileWrite { .. } => Ok(()),
+        FixAction::FileRemove { .. } => Ok(()),
+        FixAction::SymlinkRecreate { path, target } => {
+            if !path.starts_with(home_dir) {
+                return Err(format!(
+                    "refused symlink outside {}: {}",
+                    home_dir.display(),
+                    path.display()
+                ));
+            }
+            if Path::new(target).is_absolute() {
+                return Err(format!("refused absolute symlink target: {target}"));
+            }
+            if target.split('/').any(|component| component.is_empty()) {
+                return Err(format!(
+                    "refused symlink target with empty components: {target}"
+                ));
+            }
+            Ok(())
+        }
+        FixAction::SyncPrompt { .. } => Ok(()),
     }
 }
 
@@ -954,5 +994,85 @@ mod tests {
         assert!(!confirm(&mut || "n".to_string()));
         assert!(!confirm(&mut || "N".to_string()));
         assert!(!confirm(&mut || String::new()));
+    }
+
+    #[test]
+    fn test_validate_refuses_unsafe_shell_command() {
+        let fix = FixAction::ShellCommand {
+            description: "sneaky".to_string(),
+            command: "echo foo; echo injected".to_string(),
+        };
+        let err = validate(&fix, Path::new("/tmp")).unwrap_err();
+        assert!(err.contains("refused unsafe shell command"));
+    }
+
+    #[test]
+    fn test_validate_accepts_safe_shell_command() {
+        let fix = FixAction::ShellCommand {
+            description: "noop".to_string(),
+            command: "true".to_string(),
+        };
+        assert!(validate(&fix, Path::new("/tmp")).is_ok());
+    }
+
+    #[test]
+    fn test_validate_refuses_symlink_outside_home() {
+        let fix = FixAction::SymlinkRecreate {
+            path: PathBuf::from("/elsewhere/skills"),
+            target: "real.txt".to_string(),
+        };
+        let err = validate(&fix, Path::new("/home/user")).unwrap_err();
+        assert!(err.contains("refused symlink outside"));
+    }
+
+    #[test]
+    fn test_validate_refuses_absolute_symlink_target() {
+        let fix = FixAction::SymlinkRecreate {
+            path: PathBuf::from("/home/user/skills"),
+            target: "/etc/passwd".to_string(),
+        };
+        let err = validate(&fix, Path::new("/home/user")).unwrap_err();
+        assert!(err.contains("refused absolute symlink target"));
+    }
+
+    #[test]
+    fn test_validate_refuses_symlink_target_with_empty_components() {
+        let fix = FixAction::SymlinkRecreate {
+            path: PathBuf::from("/home/user/skills"),
+            target: "a//b".to_string(),
+        };
+        let err = validate(&fix, Path::new("/home/user")).unwrap_err();
+        assert!(err.contains("refused symlink target with empty components"));
+    }
+
+    #[test]
+    fn test_validate_accepts_in_bounds_symlink() {
+        let fix = FixAction::SymlinkRecreate {
+            path: PathBuf::from("/home/user/.agents/skills/x"),
+            target: "../../.agents/skills/x/SKILL.md".to_string(),
+        };
+        assert!(validate(&fix, Path::new("/home/user")).is_ok());
+    }
+
+    #[test]
+    fn test_validate_accepts_file_write_and_remove_pending_path_bounds() {
+        let write = FixAction::FileWrite {
+            path: PathBuf::from("/anywhere/file.md"),
+            content: "body".to_string(),
+        };
+        let remove = FixAction::FileRemove {
+            path: PathBuf::from("/anywhere/file.md"),
+        };
+        assert!(validate(&write, Path::new("/home/user")).is_ok());
+        assert!(validate(&remove, Path::new("/home/user")).is_ok());
+    }
+
+    #[test]
+    fn test_validate_accepts_sync_prompt() {
+        let fix = FixAction::SyncPrompt {
+            prompt_id: "GEMINI".to_string(),
+            agent_id: "gemini-cli".to_string(),
+        };
+        assert!(validate(&fix, Path::new("/home/user")).is_ok());
     }
 }

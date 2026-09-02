@@ -416,7 +416,7 @@ pub enum SyncAction {
 }
 
 /// A single mapping in a sync plan: one prompt → one agent destination.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncMapping {
     pub prompt_id: String,
     pub agent_id: String,

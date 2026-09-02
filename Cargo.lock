@@ -65,6 +65,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "agentry-harness"
+version = "0.2.0"
+dependencies = [
+ "agentry-agents",
+ "agentry-audit",
+ "agentry-core",
+ "agentry-sync",
+ "chrono",
+ "serde",
+ "serde_json",
+ "sha1",
+ "tokio",
+ "toml",
+]
+
+[[package]]
 name = "agentry-openclaw"
 version = "0.2.0"
 dependencies = [
@@ -114,6 +130,7 @@ dependencies = [
  "agentry-agents",
  "agentry-audit",
  "agentry-core",
+ "agentry-harness",
  "agentry-openclaw",
  "agentry-skills",
  "agentry-sync",

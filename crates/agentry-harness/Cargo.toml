@@ -1,0 +1,20 @@
+[package]
+name = "agentry-harness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Agentry Harness: action model, consent gates, and registry for all agentry-executed operations"
+repository.workspace = true
+
+[dependencies]
+agentry-core = { workspace = true }
+agentry-agents = { workspace = true }
+agentry-audit = { workspace = true }
+agentry-sync = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha1 = { workspace = true }
+chrono = { workspace = true }
+toml = { workspace = true }
+tokio = { workspace = true }

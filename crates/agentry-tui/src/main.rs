@@ -220,8 +220,6 @@ async fn cmd_detect() -> Result<()> {
 
 async fn cmd_sync(prompt_name: Option<String>, all: bool, dry_run: bool) -> Result<()> {
     use agentry_core::discovery::discover_prompts;
-    use agentry_sync::executor::execute_sync;
-    use agentry_sync::planner::plan_sync;
 
     let home = resolve_home();
     let project_dirs = vec![home.join(agentry_core::models::DEFAULT_PROJECT_DIR)];
@@ -230,9 +228,9 @@ async fn cmd_sync(prompt_name: Option<String>, all: bool, dry_run: bool) -> Resu
     let prompts = discover_prompts(&home, &project_dirs);
 
     let prompts_to_sync: Vec<_> = if let Some(name) = prompt_name {
-        prompts.into_iter().filter(|p| p.name == name).collect()
+        prompts.iter().filter(|p| p.name == name).cloned().collect()
     } else if all {
-        prompts
+        prompts.clone()
     } else {
         println!("Specify --prompt <name> or --all to sync");
         return Ok(());
@@ -240,22 +238,60 @@ async fn cmd_sync(prompt_name: Option<String>, all: bool, dry_run: bool) -> Resu
 
     if dry_run {
         println!("DRY RUN — no changes will be made\n");
+        for prompt in &prompts_to_sync {
+            println!("Syncing: {}", prompt.name);
+            let plan = agentry_sync::planner::plan_sync(prompt, &agents, &home);
+            let results = agentry_sync::executor::execute_sync(prompt, &plan.mappings, true);
+            for result in &results {
+                let icon = if result.success { "✓" } else { "✗" };
+                println!(
+                    "  {} {} → {}",
+                    icon, result.mapping.agent_id, result.message
+                );
+            }
+        }
+        return Ok(());
     }
 
+    let registry = build_harness_registry();
     for prompt in &prompts_to_sync {
         println!("Syncing: {}", prompt.name);
-        let plan = plan_sync(prompt, &agents, &home);
-        let results = execute_sync(prompt, &plan.mappings, dry_run);
-        for result in &results {
-            let icon = if result.success { "✓" } else { "✗" };
-            println!(
-                "  {} {} → {}",
-                icon, result.mapping.agent_id, result.message
-            );
+        let ctx =
+            agentry_harness::HarnessContext::new(home.clone(), agents.clone(), prompts.clone());
+        let input = agentry_harness::ActionInput::SyncExecute {
+            prompt_id: Some(prompt.id.clone()),
+            mappings: Vec::new(),
+        };
+        let result = registry.invoke_confirmed(&ctx, "sync.execute", input).await;
+        match result {
+            Ok(agentry_harness::ActionOutput::SyncExecuted { applied, skipped }) => {
+                println!("  ✓ {applied} applied, {skipped} skipped");
+            }
+            Ok(_) => unreachable!("sync.execute returns SyncExecuted"),
+            Err(err) => {
+                println!("  ✗ {err}");
+            }
         }
     }
 
     Ok(())
+}
+
+fn build_harness_registry() -> agentry_harness::HarnessRegistry {
+    let mut registry = agentry_harness::HarnessRegistry::new();
+    registry.register(Box::new(
+        agentry_harness::actions::sync_action::SyncExecuteAction,
+    ));
+    registry.register(Box::new(
+        agentry_harness::actions::audit_action::AuditRunAction,
+    ));
+    registry.register(Box::new(
+        agentry_harness::actions::fix_action::FixApplyAction,
+    ));
+    registry.register(Box::new(
+        agentry_harness::actions::fix_action::FixApplyAllAction,
+    ));
+    registry
 }
 
 async fn cmd_skills(action: Option<SkillsCommands>) -> Result<()> {
@@ -678,7 +714,32 @@ async fn cmd_audit(
             return Ok(());
         }
         let before_count = report.summary.total_findings;
-        let outcomes = agentry_audit::fix::apply_fixes(&findings, &home, yes);
+        let outcomes = if yes {
+            let registry = build_harness_registry();
+            let ctx = agentry_harness::HarnessContext::new(
+                home.clone(),
+                agentry_agents::detect_all_agents().await,
+                agentry_core::discovery::discover_prompts(&home, &project_dirs),
+            )
+            .with_report(Some(report.clone()));
+            match registry
+                .invoke_confirmed(
+                    &ctx,
+                    "fix.apply_all",
+                    agentry_harness::ActionInput::FixApplyAll,
+                )
+                .await
+            {
+                Ok(agentry_harness::ActionOutput::FixAppliedAll { outcomes }) => outcomes,
+                Ok(_) => unreachable!("fix.apply_all returns FixAppliedAll"),
+                Err(err) => {
+                    eprintln!("fix.apply_all failed: {}", err);
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            agentry_audit::fix::apply_fixes(&findings, &home, false)
+        };
         for outcome in &outcomes {
             let icon = if outcome.success {
                 "✓"
