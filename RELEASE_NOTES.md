@@ -1,41 +1,38 @@
-# Release Notes — agentry v0.2.0
+# Release Notes — agentry v0.2.1
 
-**Released:** 2026-08-29
+**Released:** 2026-09-02
 
 ## What's New
 
-### Agent Audit
+### Agent Auditor
 
-agentry can now answer "is this machine's agent setup healthy?" `agentry audit`
-runs 24 diagnostic checks across 11 categories — installation, versions, config
-files, prompt health, sync drift, cross-agent drift, skills, auth, orphaned
-files, OpenClaw, and ACP. Each agent gets a health score (0-100) with a grade,
-and every finding includes a remediation. `--fix` repairs what is safely
-repairable (fail-closed shell allowlist, metacharacter injection refused).
+The headline of this release: agentry now has its own agent. `agentry auditor
+review` runs the deterministic audit, then hands the report to a headless
+agent CLI (claude-code, codex, gemini-cli, or ollama — config-driven host
+registry, zai seeded, fal excluded) for root-cause analysis and remediation
+proposals.
 
-`agentry audit --json` emits a stable, versioned report (`schema_version` 1)
-with exit codes 0 (clean), 1 (critical findings), and 2 (error) — usable as a
-gate in CI pipelines or agentic workflows.
+Auditor findings arrive as Suggestions only. A proposed fix is quarantined at
+parse time, validated against the same fail-closed gate as deterministic
+fixes, and applies only with an explicit per-finding keystroke. Batch apply
+never touches Audited findings.
 
-### Self-evolving feedback loop
+### TUI restructure
 
-Audit runs append findings to `~/.agents/audit/history.jsonl`. Recurring
-findings are promoted, dormant checks demoted, and new-check candidates
-surfaced — deterministic rules, no LLM in the loop.
+Six tabs became five: OpenClaw is a supported client, not a category, so it
+merged into the Agents tab detail. The bottom two rows are now a persistent
+keymap bar — always visible, always current, rendered from the same registry
+that dispatches keys, so the bar, the handlers, and the help overlay cannot
+drift.
 
-### TUI Audit tab
+The Sync and Audit tabs finally do what their hints always claimed. The sync
+plan auto-loads on entry; `s` executes the selected mapping, `S` executes all.
+The audit auto-runs on first entry; `a` applies the selected finding's fix,
+`A` applies all fixable, and `l`/`L` invoke the auditor on a finding — an
+explicit keypress, so LLM egress is user-initiated every time.
 
-Press `6` in the TUI: run the audit on demand (`r`), filter by severity (`f`),
-browse grouped findings with a detail panel, and see per-agent health bars.
-The Agents tab now shows a health line per agent.
-
-### Prompt dedup and TUI fixes
-
-Prompt discovery dedups by (name, scope), preferring the canonical
-`~/.agents/prompts/` store — this removes duplicate GEMINI entries and the
-edit-hazard on synced copies. List selection offset bugs in the Prompts,
-Skills, and Sync tabs are fixed, and the intro screen renders the full ASCII
-logo without clipping.
+Underneath, every mutation flows through the Agentry Harness — one gated
+action registry, one consent ledger (`~/.agents/agentry/consent.jsonl`).
 
 ## Upgrade
 
@@ -43,18 +40,21 @@ logo without clipping.
 cargo install agentry-tui
 ```
 
-Pre-built binaries: [GitHub Releases](https://github.com/AndlerRL/agentry/releases).
+Or the installer script: `curl -LsSf https://github.com/AndlerRL/agentry/releases/latest/download/agentry-tui-installer.sh | sh`
 
-## Audit Quickstart
+## Auditor Quickstart
 
 ```bash
-agentry audit              # full report with health scores
-agentry audit --json       # machine-readable report (CI/agents)
-agentry audit --fix --yes  # apply auto-fixable findings, no prompts
+agentry auditor setup    # write config + canonical prompt (idempotent)
+agentry auditor review   # audit, then LLM review, merged report
 ```
+
+In the TUI: Audit tab, select a finding, `l` to review with the auditor, `a`
+to apply a gate-validated suggested fix.
 
 ## Known Issues
 
-- `agentry skills update` bug (pre-existing) and cross-distro install issues are under investigation
+- Nothing blocking. On the roadmap for P4: onboarding wizard with llmfit,
+  the ACP worker (`agentry auditor serve`), and the `w` harness palette.
 
 Full changelog: [CHANGELOG.md](CHANGELOG.md)

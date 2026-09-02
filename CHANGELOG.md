@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-09-02
+
+### Added
+
+- **Agentry Harness** (ADR-002) — New `agentry-harness` crate unifying systematic and agentic actions: HarnessAction trait, GateTicket consent enforcement (crate-internal minting, action-bound, fail-closed), consent ledger at `~/.agents/agentry/consent.jsonl`, two-phase prepare/invoke. Every TUI/CLI mutation flows through the gated registry
+- **Agent Auditor** (ADR-002) — New `agentry-auditor` crate: `agentry auditor review` invokes a headless agent CLI (claude → codex → gemini → ollama, config-driven host registry incl. zai seeded / fal excluded) to analyze the audit report; prompt loads skill-creator + context-engineering skills; findings quarantined as Suggestion-only with gate-validated, consent-required auto-apply
+- **`agentry auditor setup`** — Idempotent config + canonical auditor prompt + skill lockfile adoption
+- **Audit-fix keys in the TUI** — `a` applies the selected finding's fix, `A` applies all fixable (ADR-001 §4.1 finally complete); `l`/`L` invoke the auditor on the selected finding (explicit keypress, egress-disclosing consent)
+- **Persistent keymap bar** — Bottom 2 rows, always visible, registry-driven (dispatch + bar + help are one source of truth), swaps to y/n/Esc during confirm modals
+- **Sync tab actionability** — Plan auto-loads on entry; `s` executes selected mapping, `S` executes all (y/n confirm)
+- **Audit tab auto-run** on first entry
+- **Version picker** — Enter installs the selected version (was a dead end)
+- **Host invocation hardening** — argv-split (never `sh -c`), shell-safe interpolation validation, terminal suspend/restore, fail-closed on unparseable output
+
+### Changed
+
+- OpenClaw merged into the Agents tab detail (was a separate tab — 6 tabs → 5: Agents, Prompts, Skills, Sync, Audit)
+- Audit report `schema_version` 1 → 2 (Audited finding category + `suggested_fix` field)
+- Sync planner excludes `agentry-role`-marked prompts (fail-closed)
+- History promotion/demotion skips Audited findings (Suggestion cap cannot be bypassed by recurrence)
+- Number keys reset selection; `←` guarded; `i` de-aliased; `w` workflow key removed (returns in P4 as harness palette)
+
+### Fixed
+
+- tokio `Handle::block_on` panics in async TUI context (all invocation sites now use `block_in_place` + current-thread runtime)
+- Audited suggested fixes could never execute (gate was airtight, vault door never opened)
+- Version strings from registries now validated against a safe charset before shell interpolation
+
 ## [0.2.0] - 2026-08-29
 
 ### Added
@@ -53,5 +81,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed `HOME` environment variable resolution — uses `dirs::home_dir()` fallback with warning
 - Fixed license field inconsistency (MIT → Apache-2.0) to match LICENSE file
 
+[0.2.1]: https://github.com/AndlerRL/agentry/releases/tag/v0.2.1
 [0.2.0]: https://github.com/AndlerRL/agentry/releases/tag/v0.2.0
 [0.1.0]: https://github.com/AndlerRL/agentry/releases/tag/v0.1.0
