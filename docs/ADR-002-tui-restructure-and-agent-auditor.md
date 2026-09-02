@@ -256,7 +256,7 @@ pub enum TuiAction {
 - The bottom bar renders the focused tab's table filtered by `when` — so a hint can only drift from its handler if someone edits the one table where both live. Drift is structurally prevented, not policed by review.
 - The help overlay renders from the same tables (all tabs, ignoring `when`), so the overlay and the bar can never disagree.
 - Conditional hints: `when` predicates keep the bar honest — e.g. `a: apply suggestion` appears on the Audit tab only when the selected finding is `Audited` with a gate-validable `suggested_fix`; `Enter: install pinned version` appears only while `version_list` is loaded.
-- Width overflow: enabled bindings render left-to-right; if the terminal is too narrow, lowest-priority hints (declared order) truncate with a trailing `…`. Navigation keys (`j/k`, `Tab`) always render first.
+- Width overflow: enabled bindings render left-to-right; if the terminal is too narrow the bar wraps to at most 2 lines rather than truncating, showing MORE keys. Navigation keys (`j/k`, `Tab`) always render first. Bindings that no longer fit on either line are dropped.
 - Confirm dialogs (`y/n`) are themselves bindings in the table, so during a confirm the bar shows exactly the two keys that work.
 
 #### 3.2 Testing
