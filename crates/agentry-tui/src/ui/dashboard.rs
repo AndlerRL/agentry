@@ -85,10 +85,6 @@ pub fn draw_dashboard(f: &mut Frame, app: &App) {
             draw_sync_list(f, app, main[0]);
             draw_sync_detail(f, app, main[1]);
         }
-        Some(Tab::OpenClaw) => {
-            draw_openclaw_list(f, app, main[0]);
-            draw_openclaw_detail(f, app, main[1]);
-        }
         Some(Tab::Audit) => {
             draw_audit_list(f, app, main[0]);
             draw_audit_detail(f, app, main[1]);
@@ -446,6 +442,78 @@ fn draw_agent_detail_enhanced(f: &mut Frame, app: &App, area: Rect) {
                 format!("  {}", app.status_message.as_deref().unwrap_or("Confirm?")),
                 Style::default().fg(Color::Yellow),
             )));
+        }
+
+        if agent.spec.id == "openclaw" {
+            if let Some(ref oc_state) = app.openclaw_state {
+                agent_lines.push(Line::from(""));
+                agent_lines.push(Line::from(Span::styled(
+                    format!(
+                        " ── Workspaces ({}) ──────────────────",
+                        oc_state.workspaces.len()
+                    ),
+                    Style::default().fg(Color::DarkGray),
+                )));
+                if oc_state.workspaces.is_empty() {
+                    let status = if oc_state.installed {
+                        "  No workspaces found"
+                    } else {
+                        "  OpenClaw not installed"
+                    };
+                    agent_lines.push(Line::from(Span::styled(
+                        status,
+                        Style::default().fg(Color::DarkGray),
+                    )));
+                } else {
+                    for ws in &oc_state.workspaces {
+                        let default_marker = if ws.is_default { " ★" } else { "" };
+                        let model_info = ws.model.as_deref().unwrap_or("default");
+                        let doc_badges = format!(
+                            " {}{}{}{}{}{}",
+                            if ws.has_soul_md { "S" } else { "·" },
+                            if ws.has_agents_md { "A" } else { "·" },
+                            if ws.has_tools_md { "T" } else { "·" },
+                            if ws.has_identity_md { "I" } else { "·" },
+                            if ws.has_memory_md { "M" } else { "·" },
+                            if ws.has_user_md { "U" } else { "·" },
+                        );
+                        let wf_info = if ws.lobster_workflows.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" ⚡{}", ws.lobster_workflows.len())
+                        };
+                        let row = format!(
+                            "  {:<16}[{}]{} {}{}",
+                            ws.name, model_info, default_marker, doc_badges, wf_info
+                        );
+                        agent_lines.push(Line::from(Span::styled(
+                            truncate_to_width(&row, detail_width),
+                            Style::default().fg(if ws.is_default {
+                                Color::White
+                            } else {
+                                Color::DarkGray
+                            }),
+                        )));
+                        for doc in &ws.docs {
+                            let size_kb = doc.size_bytes as f64 / 1024.0;
+                            let doc_row = format!(
+                                "      {:<14}{:>7.1} KB  {}",
+                                doc.doc_type.to_string(),
+                                size_kb,
+                                doc.path.display()
+                            );
+                            agent_lines.push(Line::from(Span::styled(
+                                truncate_to_width(&doc_row, detail_width),
+                                Style::default().fg(Color::DarkGray),
+                            )));
+                        }
+                    }
+                }
+                agent_lines.push(Line::from(Span::styled(
+                    "  Enter: edit first doc  n: New workspace  c: openclaw setup  a: Add agent",
+                    Style::default().fg(Color::Yellow),
+                )));
+            }
         }
 
         agent_lines
@@ -1152,258 +1220,6 @@ fn draw_sync_detail(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(paragraph, area);
 }
 
-// ── OpenClaw Tab ─────────────────────────────────────────────────────────
-
-fn draw_openclaw_list(f: &mut Frame, app: &App, area: Rect) {
-    let items: Vec<ListItem> = if let Some(ref oc_state) = app.openclaw_state {
-        if oc_state.workspaces.is_empty() {
-            let status = if oc_state.installed {
-                "OpenClaw installed — no workspaces found"
-            } else {
-                "OpenClaw not installed"
-            };
-            vec![
-                ListItem::new(Line::from(Span::styled(
-                    format!("  {}", status),
-                    Style::default().fg(Color::DarkGray),
-                ))),
-                ListItem::new(Line::from("")),
-                ListItem::new(Line::from(Span::styled(
-                    "  c: Create workspace (via openclaw CLI)",
-                    Style::default().fg(Color::Yellow),
-                ))),
-                ListItem::new(Line::from(Span::styled(
-                    "  a: Add sub-agent",
-                    Style::default().fg(Color::Yellow),
-                ))),
-            ]
-        } else {
-            let mut items = Vec::new();
-
-            let status_icon = if oc_state.installed { "✓" } else { "✗" };
-            let status_color = if oc_state.installed {
-                Color::Green
-            } else {
-                Color::Red
-            };
-            items.push(ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!(" {} OpenClaw ", status_icon),
-                    Style::default().fg(status_color),
-                ),
-                Span::styled(
-                    format!(
-                        "({} workspace{})",
-                        oc_state.workspaces.len(),
-                        if oc_state.workspaces.len() == 1 {
-                            ""
-                        } else {
-                            "s"
-                        }
-                    ),
-                    Style::default().fg(Color::DarkGray),
-                ),
-            ])));
-            items.push(ListItem::new(Line::from("")));
-
-            for ws in &oc_state.workspaces {
-                let default_marker = if ws.is_default { " ★" } else { "" };
-                let model_info = ws.model.as_deref().unwrap_or("default");
-
-                // Doc status as compact badges
-                let doc_badges = format!(
-                    " {}{}{}{}{}{}",
-                    if ws.has_soul_md { "S" } else { "·" },
-                    if ws.has_agents_md { "A" } else { "·" },
-                    if ws.has_tools_md { "T" } else { "·" },
-                    if ws.has_identity_md { "I" } else { "·" },
-                    if ws.has_memory_md { "M" } else { "·" },
-                    if ws.has_user_md { "U" } else { "·" },
-                );
-
-                items.push(ListItem::new(Line::from(vec![
-                    Span::styled(
-                        format!("  {:<20}", ws.name),
-                        Style::default().fg(Color::White),
-                    ),
-                    Span::styled(
-                        format!("[{}]", model_info),
-                        Style::default().fg(Color::DarkGray),
-                    ),
-                    Span::styled(default_marker, Style::default().fg(Color::Yellow)),
-                    Span::styled(doc_badges, Style::default().fg(Color::DarkGray)),
-                ])));
-            }
-
-            items
-        }
-    } else {
-        vec![ListItem::new(Line::from(Span::styled(
-            "  Not loaded",
-            Style::default().fg(Color::DarkGray),
-        )))]
-    };
-
-    let ws_count = app
-        .openclaw_state
-        .as_ref()
-        .map(|s| s.workspaces.len())
-        .unwrap_or(0);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(format!(" OpenClaw ({}) ", ws_count))
-        .border_style(Style::default().fg(Color::Cyan));
-
-    let mut state = ListState::default();
-    if app.list_selected < items.len() {
-        state.select(Some(app.list_selected));
-    }
-
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
-    f.render_stateful_widget(list, area, &mut state);
-}
-
-fn draw_openclaw_detail(f: &mut Frame, app: &App, area: Rect) {
-    let detail_width = area.width.saturating_sub(4);
-
-    let lines = if let Some(ref oc_state) = app.openclaw_state {
-        if oc_state.workspaces.is_empty() {
-            vec![
-                Line::from(""),
-                Line::from(Span::styled(
-                    "  No OpenClaw workspaces found",
-                    Style::default().fg(Color::DarkGray),
-                )),
-                Line::from(""),
-                Line::from(Span::styled(
-                    "  Press 'c' to create a workspace via openclaw CLI",
-                    Style::default().fg(Color::Yellow),
-                )),
-                Line::from(Span::styled(
-                    "  Press 'a' to add a sub-agent",
-                    Style::default().fg(Color::Yellow),
-                )),
-            ]
-        } else {
-            // Resolve workspace index (row 0 = status, row 1 = spacer, row 2+ = workspaces)
-            let ws_row = app.list_selected.saturating_sub(2);
-            if let Some(ws) = oc_state.workspaces.get(ws_row) {
-                let mut detail_lines = vec![
-                    Line::from(Span::styled(
-                        format!(" {} ", ws.name),
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    )),
-                    Line::from(""),
-                    Line::from(vec![
-                        Span::styled("  ID:        ", Style::default().fg(Color::Yellow)),
-                        Span::styled(&ws.id, Style::default().fg(Color::White)),
-                    ]),
-                    Line::from(vec![
-                        Span::styled("  Path:      ", Style::default().fg(Color::Yellow)),
-                        Span::styled(
-                            truncate_to_width(
-                                &ws.workspace_path.display().to_string(),
-                                detail_width,
-                            ),
-                            Style::default().fg(Color::DarkGray),
-                        ),
-                    ]),
-                ];
-
-                if let Some(ref model) = ws.model {
-                    detail_lines.push(Line::from(vec![
-                        Span::styled("  Model:     ", Style::default().fg(Color::Yellow)),
-                        Span::styled(model.clone(), Style::default().fg(Color::White)),
-                    ]));
-                }
-
-                if ws.is_default {
-                    detail_lines.push(Line::from(vec![
-                        Span::styled("  Default:   ", Style::default().fg(Color::Yellow)),
-                        Span::styled("Yes ★", Style::default().fg(Color::Green)),
-                    ]));
-                }
-
-                detail_lines.push(Line::from(""));
-                detail_lines.push(Line::from(Span::styled(
-                    " ── Workspace Docs ─────────────────────",
-                    Style::default().fg(Color::DarkGray),
-                )));
-
-                for doc in &ws.docs {
-                    let size_kb = doc.size_bytes as f64 / 1024.0;
-                    detail_lines.push(Line::from(vec![
-                        Span::styled(
-                            format!("  {:<14}", doc.doc_type.to_string()),
-                            Style::default().fg(Color::White),
-                        ),
-                        Span::styled(
-                            format!("{:>6.1} KB", size_kb),
-                            Style::default().fg(Color::DarkGray),
-                        ),
-                    ]));
-                }
-
-                if ws.docs.is_empty() {
-                    detail_lines.push(Line::from(Span::styled(
-                        "  No docs found",
-                        Style::default().fg(Color::DarkGray),
-                    )));
-                }
-
-                if !ws.lobster_workflows.is_empty() {
-                    detail_lines.push(Line::from(""));
-                    detail_lines.push(Line::from(Span::styled(
-                        " ── Lobster Workflows ───────────────────",
-                        Style::default().fg(Color::DarkGray),
-                    )));
-                    for wf in &ws.lobster_workflows {
-                        detail_lines.push(Line::from(Span::styled(
-                            format!("  {} {}", "⚡", wf.name),
-                            Style::default().fg(Color::White),
-                        )));
-                    }
-                }
-
-                detail_lines.push(Line::from(""));
-                detail_lines.push(Line::from(Span::styled(
-                    " ── Actions ──────────────────────────",
-                    Style::default().fg(Color::DarkGray),
-                )));
-                detail_lines.push(Line::from(Span::styled(
-                    "  Enter: Edit doc  n: Create workspace",
-                    Style::default().fg(Color::Yellow),
-                )));
-                detail_lines.push(Line::from(Span::styled(
-                    "  a: Add sub-agent  g: Open in shell",
-                    Style::default().fg(Color::Yellow),
-                )));
-
-                detail_lines
-            } else {
-                vec![Line::from("")]
-            }
-        }
-    } else {
-        vec![Line::from(Span::styled(
-            "  OpenClaw not loaded",
-            Style::default().fg(Color::DarkGray),
-        ))]
-    };
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" Workspace Detail ")
-        .border_style(Style::default().fg(Color::Cyan));
-
-    let paragraph = Paragraph::new(lines).block(block);
-    f.render_widget(paragraph, area);
-}
-
 fn severity_label(severity: Severity) -> &'static str {
     match severity {
         Severity::Critical => "Critical",
@@ -1722,7 +1538,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
             Span::raw("Switch tabs"),
         ]),
         Line::from(vec![
-            Span::styled("  1-6        ", Style::default().fg(Color::Yellow)),
+            Span::styled("  1-5        ", Style::default().fg(Color::Yellow)),
             Span::raw("Jump to tab (1=Agents, 2=Prompts, ...)"),
         ]),
         Line::from(Span::styled(
@@ -1939,7 +1755,7 @@ mod tests {
     #[test]
     fn dashboard_renders_keymap_bar_on_audit_tab() {
         let mut app = App::new();
-        app.tab_index = 5;
+        app.tab_index = 4;
         let rendered = render_dashboard_to_string(&app, 200, 24);
         assert!(rendered.contains("r Run audit"));
     }

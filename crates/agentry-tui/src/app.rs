@@ -27,7 +27,7 @@ pub struct OpenClawState {
 pub struct App {
     /// Current mode
     pub mode: AppMode,
-    /// Current tab index (0-5)
+    /// Current tab index (0-4)
     pub tab_index: usize,
     /// Currently selected item in list panels
     pub list_selected: usize,
@@ -525,14 +525,14 @@ impl App {
     }
 
     fn next_tab(&mut self) {
-        self.tab_index = (self.tab_index + 1) % 6;
+        self.tab_index = (self.tab_index + 1) % 5;
         self.list_selected = 0;
         self.method_selected = 0;
     }
 
     fn prev_tab(&mut self) {
         self.tab_index = if self.tab_index == 0 {
-            5
+            4
         } else {
             self.tab_index - 1
         };
@@ -636,18 +636,6 @@ impl App {
                 }
             }
             4 => {
-                // OpenClaw: status header + spacer + workspaces (each on one line with doc badges)
-                if let Some(ref oc_state) = self.openclaw_state {
-                    if oc_state.workspaces.is_empty() {
-                        5 // status message + spacer + 2 hints + empty
-                    } else {
-                        1 + 1 + oc_state.workspaces.len() // status header + spacer + workspaces
-                    }
-                } else {
-                    1
-                }
-            }
-            5 => {
                 let report = match self.audit_report.as_ref() {
                     Some(r) => r,
                     None => return 0,
@@ -837,22 +825,23 @@ impl App {
         None
     }
 
-    /// Resolve the selected workspace index (OpenClaw tab).
-    fn selected_workspace_index(&self) -> Option<usize> {
-        if self.tab_index != 4 {
-            return None;
-        }
+    fn selected_agent(&self) -> Option<&agentry_core::models::DetectedAgent> {
+        self.detected_agents.get(self.list_selected)
+    }
+
+    pub(crate) fn selected_agent_is_openclaw(&self) -> bool {
+        self.selected_agent()
+            .is_some_and(|a| a.spec.id == "openclaw")
+    }
+
+    pub(crate) fn openclaw_default_doc_path(&self) -> Option<std::path::PathBuf> {
         let oc_state = self.openclaw_state.as_ref()?;
-        if oc_state.workspaces.is_empty() {
-            return None;
-        }
-        // Layout: status header (row 0) + spacer (row 1) + workspace entries (row 2+)
-        let ws_row = self.list_selected.saturating_sub(2);
-        if ws_row < oc_state.workspaces.len() {
-            Some(ws_row)
-        } else {
-            None
-        }
+        let ws = oc_state
+            .workspaces
+            .iter()
+            .find(|ws| ws.is_default)
+            .or_else(|| oc_state.workspaces.first())?;
+        ws.docs.first().map(|d| d.path.clone())
     }
 
     pub(crate) fn audit_groups<'a>(
@@ -883,7 +872,7 @@ impl App {
     }
 
     pub fn selected_finding(&self) -> Option<&agentry_audit::report::AuditFinding> {
-        if self.tab_index != 5 {
+        if self.tab_index != 4 {
             return None;
         }
         let report = self.audit_report.as_ref()?;
@@ -909,7 +898,7 @@ impl App {
     }
 
     fn on_cycle_audit_filter(&mut self) {
-        if self.tab_index != 5 {
+        if self.tab_index != 4 {
             return;
         }
         use agentry_audit::report::Severity;
@@ -1014,6 +1003,16 @@ impl App {
     fn on_enter(&mut self) {
         match self.tab_index {
             0 => {
+                if self.selected_agent_is_openclaw() {
+                    let doc_path = self.openclaw_default_doc_path();
+                    match doc_path {
+                        Some(path) => self.edit_file_externally(&path),
+                        None => {
+                            self.status_message = Some("No docs in the default workspace".into())
+                        }
+                    }
+                    return;
+                }
                 // Agents tab - install via selected method
                 if let Some(agent) = self.detected_agents.get(self.list_selected) {
                     if let Some(method) = agent.spec.install_methods.get(self.method_selected) {
@@ -1066,22 +1065,6 @@ impl App {
                 }
             }
             4 => {
-                // OpenClaw tab - edit selected workspace doc
-                let doc_path: Option<std::path::PathBuf> = {
-                    let oc_state = self.openclaw_state.as_ref();
-                    let ws_idx = self.selected_workspace_index();
-                    oc_state
-                        .and_then(|s| ws_idx.and_then(|i| s.workspaces.get(i)))
-                        .and_then(|ws| ws.docs.first().map(|d| d.path.clone()))
-                };
-                let has_ws = self.selected_workspace_index().is_some();
-                if let Some(path) = doc_path {
-                    self.edit_file_externally(&path);
-                } else if has_ws {
-                    self.status_message = Some("No docs in this workspace".into());
-                }
-            }
-            5 => {
                 let finding = self.selected_finding().cloned();
                 if let Some(finding) = finding {
                     if let Some(path) = Self::finding_edit_path(&finding) {
@@ -1099,8 +1082,7 @@ impl App {
         if self.tab_index == 1 {
             self.new_prompt_name = Some(String::new());
             self.status_message = Some("Enter prompt name, then press Enter".into());
-        } else if self.tab_index == 4 {
-            // OpenClaw tab - create workspace
+        } else if self.tab_index == 0 && self.selected_agent_is_openclaw() {
             self.on_create_workspace();
         }
     }
@@ -1530,8 +1512,13 @@ impl App {
     }
 
     fn on_create_workspace(&mut self) {
-        if self.tab_index == 4 {
-            if agentry_openclaw::discovery::is_openclaw_installed() {
+        if self.tab_index == 0 && self.selected_agent_is_openclaw() {
+            let installed = self
+                .openclaw_state
+                .as_ref()
+                .map(|s| s.installed)
+                .unwrap_or_else(agentry_openclaw::discovery::is_openclaw_installed);
+            if installed {
                 self.status_message = Some("Run: openclaw setup".into());
                 let _ = std::process::Command::new("openclaw").arg("setup").spawn();
             } else {
@@ -1542,10 +1529,14 @@ impl App {
     }
 
     fn on_add_agent(&mut self) {
-        if self.tab_index == 4 {
-            if agentry_openclaw::discovery::is_openclaw_installed() {
+        if self.tab_index == 0 && self.selected_agent_is_openclaw() {
+            let installed = self
+                .openclaw_state
+                .as_ref()
+                .map(|s| s.installed)
+                .unwrap_or_else(agentry_openclaw::discovery::is_openclaw_installed);
+            if installed {
                 self.status_message = Some("Run: openclaw agents add <name>".into());
-                // Could prompt for name in the future, for now show guidance
             } else {
                 self.status_message = Some("OpenClaw not installed".into());
             }
@@ -1660,7 +1651,7 @@ mod tests {
 
     fn audit_app(report: AuditReport) -> App {
         let mut app = App::new();
-        app.tab_index = 5;
+        app.tab_index = 4;
         app.audit_report = Some(report);
         app
     }
@@ -1709,7 +1700,7 @@ mod tests {
     #[test]
     fn list_max_is_zero_without_report() {
         let mut app = App::new();
-        app.tab_index = 5;
+        app.tab_index = 4;
         assert_eq!(app.list_max(), 0);
         assert!(app.selected_finding().is_none());
     }
@@ -1898,7 +1889,7 @@ mod tests {
         app.tab_index = 3;
         press(&mut app, KeyCode::Char('f'));
         assert_eq!(app.audit_filter, None);
-        app.tab_index = 5;
+        app.tab_index = 4;
         press(&mut app, KeyCode::Char('f'));
         assert_eq!(
             app.audit_filter,
@@ -1908,5 +1899,125 @@ mod tests {
         assert!(app.should_quit);
         assert_eq!(app.mode, AppMode::Quit);
         press(&mut app, KeyCode::Char('?'));
+    }
+
+    fn openclaw_agent() -> DetectedAgent {
+        DetectedAgent {
+            spec: agentry_core::models::AgentSpec {
+                id: "openclaw".to_string(),
+                name: "openclaw".to_string(),
+                cli_binary: "openclaw".to_string(),
+                config_dir: ".openclaw".to_string(),
+                prompt_filename: "AGENTS.md".to_string(),
+                prompt_format: agentry_core::models::PromptFormat::PlainMd,
+                skills_dir_name: None,
+                max_size: None,
+                install_methods: Vec::new(),
+            },
+            installed: true,
+            version: None,
+            config_dir_exists: true,
+            prompt_file_exists: true,
+            skills_dir: None,
+            skills_symlink_pattern: None,
+            installed_skills: Vec::new(),
+            detected_methods: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn openclaw_enter_edits_first_doc_of_default_workspace() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![openclaw_agent()];
+        app.openclaw_state = Some(OpenClawState {
+            workspaces: vec![agentry_openclaw::discovery::OpenClawWorkspace {
+                id: "main".to_string(),
+                name: "main".to_string(),
+                workspace_path: std::env::temp_dir().join("agentry-test-ws-main"),
+                model: None,
+                is_default: true,
+                docs: vec![agentry_openclaw::discovery::WorkspaceDoc {
+                    name: "AGENTS.md".to_string(),
+                    path: std::env::temp_dir()
+                        .join("agentry-test-ws-main")
+                        .join("AGENTS.md"),
+                    doc_type: agentry_openclaw::discovery::DocType::Agents,
+                    size_bytes: 10,
+                }],
+                lobster_workflows: Vec::new(),
+                has_agents_md: true,
+                has_soul_md: false,
+                has_tools_md: false,
+                has_identity_md: false,
+                has_memory_md: false,
+                has_user_md: false,
+            }],
+            installed: true,
+        });
+        let doc = app.openclaw_default_doc_path();
+        assert!(doc.is_some());
+        assert!(doc.unwrap().file_name().unwrap() == "AGENTS.md");
+        assert!(app.selected_agent_is_openclaw());
+    }
+
+    #[test]
+    fn openclaw_keys_gated_on_agents_tab_with_openclaw_selected() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![openclaw_agent()];
+        app.openclaw_state = Some(OpenClawState {
+            workspaces: Vec::new(),
+            installed: true,
+        });
+        assert_eq!(
+            crate::ui::keymap::resolve(0, &app, "a"),
+            Some(TuiAction::AddAgent)
+        );
+        assert_eq!(
+            crate::ui::keymap::resolve(0, &app, "c"),
+            Some(TuiAction::CreateWorkspace)
+        );
+        assert_eq!(
+            crate::ui::keymap::resolve(0, &app, "n"),
+            Some(TuiAction::New)
+        );
+        press(&mut app, KeyCode::Char('a'));
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("Run: openclaw agents add <name>")
+        );
+
+        let mut non_oc = App::new();
+        non_oc.tab_index = 0;
+        non_oc.detected_agents = vec![DetectedAgent {
+            spec: agentry_core::models::AgentSpec {
+                id: "codex".to_string(),
+                name: "codex".to_string(),
+                cli_binary: "codex".to_string(),
+                config_dir: ".codex".to_string(),
+                prompt_filename: "AGENTS.md".to_string(),
+                prompt_format: agentry_core::models::PromptFormat::PlainMd,
+                skills_dir_name: None,
+                max_size: None,
+                install_methods: Vec::new(),
+            },
+            installed: true,
+            version: None,
+            config_dir_exists: true,
+            prompt_file_exists: true,
+            skills_dir: None,
+            skills_symlink_pattern: None,
+            installed_skills: Vec::new(),
+            detected_methods: Vec::new(),
+        }];
+        assert_eq!(crate::ui::keymap::resolve(0, &non_oc, "a"), None);
+        assert_eq!(crate::ui::keymap::resolve(0, &non_oc, "c"), None);
+        assert_eq!(crate::ui::keymap::resolve(0, &non_oc, "n"), None);
+        press(&mut non_oc, KeyCode::Char('a'));
+        press(&mut non_oc, KeyCode::Char('n'));
+        assert!(non_oc.status_message.is_none());
+        assert!(non_oc.agent_confirm.is_none());
+        assert!(non_oc.new_prompt_name.is_none());
     }
 }

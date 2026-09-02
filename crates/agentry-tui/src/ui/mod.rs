@@ -13,17 +13,15 @@ pub enum Tab {
     Prompts,
     Skills,
     Sync,
-    OpenClaw,
     Audit,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 6] = [
+    pub const ALL: [Tab; 5] = [
         Tab::Agents,
         Tab::Prompts,
         Tab::Skills,
         Tab::Sync,
-        Tab::OpenClaw,
         Tab::Audit,
     ];
 
@@ -33,8 +31,7 @@ impl Tab {
             Tab::Prompts => 1,
             Tab::Skills => 2,
             Tab::Sync => 3,
-            Tab::OpenClaw => 4,
-            Tab::Audit => 5,
+            Tab::Audit => 4,
         }
     }
 
@@ -48,7 +45,6 @@ impl Tab {
             Tab::Prompts => "Prompts",
             Tab::Skills => "Skills",
             Tab::Sync => "Sync",
-            Tab::OpenClaw => "OpenClaw",
             Tab::Audit => "Audit",
         }
     }

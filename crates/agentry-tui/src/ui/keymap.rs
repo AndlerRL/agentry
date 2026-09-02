@@ -72,20 +72,30 @@ fn global_bindings() -> Vec<KeyBinding> {
         binding("2", "Prompts", TuiAction::JumpTab(1)),
         binding("3", "Skills", TuiAction::JumpTab(2)),
         binding("4", "Sync", TuiAction::JumpTab(3)),
-        binding("5", "OpenClaw", TuiAction::JumpTab(4)),
-        binding("6", "Audit", TuiAction::JumpTab(5)),
+        binding("5", "Audit", TuiAction::JumpTab(4)),
     ]
 }
 
 fn agents_bindings() -> Vec<KeyBinding> {
     let when = |app: &App| app.tab_index == 0;
+    let openclaw = |app: &App| app.tab_index == 0 && app.selected_agent_is_openclaw();
+    let not_openclaw = |app: &App| app.tab_index == 0 && !app.selected_agent_is_openclaw();
     vec![
-        scoped(when, "Enter", "Install", TuiAction::Enter),
+        scoped(openclaw, "Enter", "Edit doc", TuiAction::Enter),
+        scoped(not_openclaw, "Enter", "Install", TuiAction::Enter),
         scoped(when, "u", "Update", TuiAction::Update),
         scoped(when, "r", "Remove", TuiAction::Remove),
         scoped(when, "v", "Versions", TuiAction::ListVersions),
         scoped(when, "Left", "Prev method", TuiAction::MethodPrev),
         scoped(when, "Right", "Next method", TuiAction::MethodNext),
+        scoped(openclaw, "n", "New workspace", TuiAction::New),
+        scoped(
+            openclaw,
+            "c",
+            "Create workspace",
+            TuiAction::CreateWorkspace,
+        ),
+        scoped(openclaw, "a", "Add agent", TuiAction::AddAgent),
     ]
 }
 
@@ -118,18 +128,8 @@ fn sync_bindings() -> Vec<KeyBinding> {
     ]
 }
 
-fn openclaw_bindings() -> Vec<KeyBinding> {
-    let when = |app: &App| app.tab_index == 4;
-    vec![
-        scoped(when, "Enter", "Edit doc", TuiAction::Enter),
-        scoped(when, "n", "New workspace", TuiAction::New),
-        scoped(when, "c", "Create workspace", TuiAction::CreateWorkspace),
-        scoped(when, "a", "Add agent", TuiAction::AddAgent),
-    ]
-}
-
 fn audit_bindings() -> Vec<KeyBinding> {
-    let when = |app: &App| app.tab_index == 5;
+    let when = |app: &App| app.tab_index == 4;
     vec![
         scoped(when, "r", "Run audit", TuiAction::RunAudit),
         scoped(when, "f", "Filter", TuiAction::CycleAuditFilter),
@@ -144,8 +144,7 @@ pub fn bindings_for_tab(tab_index: usize, _app: &App) -> Vec<KeyBinding> {
         1 => bindings.extend(prompts_bindings()),
         2 => bindings.extend(skills_bindings()),
         3 => bindings.extend(sync_bindings()),
-        4 => bindings.extend(openclaw_bindings()),
-        5 => bindings.extend(audit_bindings()),
+        4 => bindings.extend(audit_bindings()),
         _ => {}
     }
     bindings
@@ -214,8 +213,8 @@ mod tests {
     use super::*;
     use super::*;
 
-    const GLOBAL_KEYS: [&str; 14] = [
-        "q", "?", "Tab", "BackTab", "j", "k", "Up", "Down", "1", "2", "3", "4", "5", "6",
+    const GLOBAL_KEYS: [&str; 13] = [
+        "q", "?", "Tab", "BackTab", "j", "k", "Up", "Down", "1", "2", "3", "4", "5",
     ];
 
     fn scoped_pairs(bindings: &[KeyBinding]) -> Vec<(&str, TuiAction)> {
@@ -229,8 +228,8 @@ mod tests {
     #[test]
     fn bindings_for_tab_non_empty_for_all_tabs() {
         let app = App::new();
-        let expected_totals = [20, 18, 19, 16, 18, 17];
-        for tab in 0..6 {
+        let expected_totals = [23, 17, 18, 15, 16];
+        for tab in 0..5 {
             let bindings = bindings_for_tab(tab, &app);
             assert!(!bindings.is_empty(), "tab {tab} has no bindings");
             assert_eq!(bindings.len(), expected_totals[tab], "tab {tab} count");
@@ -240,7 +239,7 @@ mod tests {
     #[test]
     fn tab_scoped_bindings_have_when_predicates() {
         let app = App::new();
-        for tab in 0..6 {
+        for tab in 0..5 {
             let bindings = bindings_for_tab(tab, &app);
             let scoped_count = bindings.iter().filter(|b| b.when.is_some()).count();
             assert!(scoped_count > 0, "tab {tab} has no scoped bindings");
@@ -259,7 +258,7 @@ mod tests {
     #[test]
     fn global_bindings_have_when_none() {
         let app = App::new();
-        for tab in 0..6 {
+        for tab in 0..5 {
             for binding in bindings_for_tab(tab, &app) {
                 if GLOBAL_KEYS.contains(&binding.key.as_str()) {
                     assert!(
@@ -295,7 +294,6 @@ mod tests {
             ("3", TuiAction::JumpTab(2)),
             ("4", TuiAction::JumpTab(3)),
             ("5", TuiAction::JumpTab(4)),
-            ("6", TuiAction::JumpTab(5)),
         ];
         assert_eq!(global, expected);
     }
@@ -308,11 +306,15 @@ mod tests {
                 0,
                 vec![
                     ("Enter", TuiAction::Enter),
+                    ("Enter", TuiAction::Enter),
                     ("u", TuiAction::Update),
                     ("r", TuiAction::Remove),
                     ("v", TuiAction::ListVersions),
                     ("Left", TuiAction::MethodPrev),
                     ("Right", TuiAction::MethodNext),
+                    ("n", TuiAction::New),
+                    ("c", TuiAction::CreateWorkspace),
+                    ("a", TuiAction::AddAgent),
                 ],
             ),
             (
@@ -337,15 +339,6 @@ mod tests {
             (3, vec![("s", TuiAction::Sync), ("w", TuiAction::Workflow)]),
             (
                 4,
-                vec![
-                    ("Enter", TuiAction::Enter),
-                    ("n", TuiAction::New),
-                    ("c", TuiAction::CreateWorkspace),
-                    ("a", TuiAction::AddAgent),
-                ],
-            ),
-            (
-                5,
                 vec![
                     ("r", TuiAction::RunAudit),
                     ("f", TuiAction::CycleAuditFilter),
@@ -373,8 +366,8 @@ mod tests {
         let mut app = App::new();
         app.tab_index = 0;
         assert_eq!(resolve(0, &app, "r"), Some(TuiAction::Remove));
-        app.tab_index = 5;
-        assert_eq!(resolve(5, &app, "r"), Some(TuiAction::RunAudit));
+        app.tab_index = 4;
+        assert_eq!(resolve(4, &app, "r"), Some(TuiAction::RunAudit));
     }
 
     #[test]
@@ -387,8 +380,8 @@ mod tests {
     fn resolve_skips_failed_when_predicates() {
         let mut app = App::new();
         app.tab_index = 0;
-        assert_eq!(resolve(5, &app, "r"), None);
-        assert_eq!(resolve(5, &app, "q"), Some(TuiAction::Quit));
+        assert_eq!(resolve(4, &app, "r"), None);
+        assert_eq!(resolve(4, &app, "q"), Some(TuiAction::Quit));
     }
 
     fn bar_text(lines: &[Line<'static>]) -> String {
@@ -401,7 +394,7 @@ mod tests {
     #[test]
     fn bar_lines_returns_one_or_two_lines_per_tab() {
         let app = App::new();
-        for tab in 0..6 {
+        for tab in 0..5 {
             let lines = bar_lines(tab, &app, 200);
             assert!(!lines.is_empty(), "tab {tab}");
             assert!(lines.len() <= 2, "tab {tab} produced {} lines", lines.len());
@@ -431,7 +424,7 @@ mod tests {
     #[test]
     fn bar_lines_zero_width_does_not_panic() {
         let app = App::new();
-        for tab in 0..6 {
+        for tab in 0..5 {
             let _ = bar_lines(tab, &app, 0);
         }
     }
