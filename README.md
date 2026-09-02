@@ -70,7 +70,7 @@ agentry is a terminal UI application that manages prompts for **11 agent CLIs** 
 - **OpenClaw workspace** -- Discover and manage OpenClaw `.lobster` workflows
 - **ACP orchestration** -- Agent Communication Protocol for multi-agent routing
 - **Agent audit** -- Health scores (0-100) from 24 diagnostic checks, with `--fix` mode gated by a fail-closed shell allowlist and a self-evolving feedback loop
-- **Vim-like TUI** -- Terminal interface with modal editing and familiar keybindings
+- **Keyboard-first TUI** -- Five-tab dashboard with a persistent keymap bar; editing opens your `$EDITOR` (nvim/vim/vi)
 
 ## Format Converters
 
@@ -88,42 +88,52 @@ Each converter implements the `FormatConverter` trait with `parse()` and `serial
 
 ## TUI
 
-The terminal UI features an intro animation with ASCII art and a progress bar while agents are detected in parallel, followed by a 6-tab dashboard:
+The terminal UI features an intro animation with ASCII art and a progress bar while agents are detected in parallel, followed by a 5-tab dashboard:
 
 | Tab | Key | Description |
 |-----|-----|-------------|
-| Agents | `1` | Browse detected agents, versions, skills, and config paths |
-| Prompts | `2` | Manage and edit prompts with vim-like editor |
+| Agents | `1` | Browse detected agents, versions, skills, and config paths; when the `openclaw` agent is selected, the detail panel shows a Workspaces section for managing OpenClaw workspace docs and `.lobster` workflows |
+| Prompts | `2` | Manage prompts; editing opens your `$EDITOR` (nvim/vim/vi) |
 | Skills | `3` | Browse and install skill hub entries |
-| Sync | `4` | Plan and execute prompt sync |
-| OpenClaw | `5` | Manage OpenClaw workspaces |
-| Audit | `6` | Run agent health audits and review findings |
+| Sync | `4` | Plan and execute prompt sync (plan auto-loads on tab entry) |
+| Audit | `5` | Run agent health audits and review findings (auto-runs on first entry) |
 
 ### Keybindings
 
+Global keys (all tabs):
+
 | Key | Action |
 |-----|--------|
-| `j` / `k` / Arrow keys | Navigate list |
-| `Tab` / `Shift+Tab` | Switch tabs forward/backward |
-| `1` -- `6` | Jump directly to tab |
-| `Enter` | Open/edit selected item |
-| `n` | New prompt |
-| `d` | Delete prompt |
-| `s` | Sync to agents |
-| `e` | Edit prompt |
-| `u` | Update skills |
-| `i` / `a` | Insert mode |
-| `:w` / `:q` | Write/quit (vim-like commands) |
-| `?` | Toggle help overlay |
 | `q` | Quit |
+| `?` | Toggle help overlay |
+| `Tab` / `Shift+Tab` | Switch tabs forward/backward |
+| `1` -- `5` | Jump directly to tab (resets list selection) |
+| `j` / `k` / Arrow keys | Navigate list |
 
-Audit tab keys:
+A persistent keymap bar is always visible at the bottom of the TUI, showing the current tab's active keys. Per-tab keys:
 
-| Key | Action |
-|-----|--------|
-| `r` | Re-run audit |
-| `f` | Cycle severity filter (All / Critical / Warning / Info / Suggestion) |
-| `Enter` | Open finding file / show remediation |
+| Tab | Key | Action |
+|-----|-----|--------|
+| Agents | `Enter` | Install agent (or edit OpenClaw workspace doc when `openclaw` is selected) |
+| Agents | `u` | Update agent |
+| Agents | `r` | Remove agent |
+| Agents | `v` | List versions (`Enter` installs the selected version) |
+| Agents | `←` / `→` | Cycle install method |
+| Agents (openclaw) | `c` | Create workspace |
+| Agents (openclaw) | `n` | New workspace |
+| Agents (openclaw) | `a` | Add agent (shows the `openclaw agents add` command) |
+| Prompts | `Enter` / `e` | Edit prompt in `$EDITOR` |
+| Prompts | `n` | New prompt |
+| Prompts | `d` | Delete prompt |
+| Skills | `Enter` / `i` | Install skill |
+| Skills | `u` | Update skill |
+| Skills | `r` | Remove skill |
+| Skills | `g` | Open skill GitHub repository |
+| Sync | `s` | Execute selected mapping |
+| Sync | `S` | Execute all non-skip mappings |
+| Audit | `r` | Re-run audit |
+| Audit | `f` | Cycle severity filter (All / Critical / Warning / Info / Suggestion) |
+| Audit | `Enter` | Open finding file / show remediation |
 
 ## CLI Usage
 
