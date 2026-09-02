@@ -31,7 +31,8 @@ pub fn is_safe_shell_command(command: &str) -> bool {
 }
 
 pub fn apply_fix(finding: &AuditFinding, home_dir: &Path) -> FixOutcome {
-    let (success, message) = match &finding.fix {
+    let action = finding.fix.as_ref().or(finding.suggested_fix.as_ref());
+    let (success, message) = match action {
         Some(action) => {
             if let Err(reason) = validate(action, home_dir) {
                 (false, reason)

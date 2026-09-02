@@ -130,6 +130,24 @@ mod tests {
         }
     }
 
+    fn audited_finding_with_suggested_fix(
+        check_id: &str,
+        suggested_fix: agentry_audit::report::FixAction,
+    ) -> AuditFinding {
+        AuditFinding {
+            check_id: check_id.to_string(),
+            severity: Severity::Suggestion,
+            category: FindingCategory::Audited,
+            agent_id: None,
+            message: format!("finding {check_id}"),
+            remediation: "run the fix".to_string(),
+            auto_fixable: false,
+            fix: None,
+            suggested_fix: Some(suggested_fix),
+            evidence: None,
+        }
+    }
+
     fn report_with(findings: Vec<AuditFinding>) -> agentry_audit::report::AuditReport {
         use agentry_audit::report::{AuditReport, AuditSummary};
         use chrono::Utc;
@@ -210,6 +228,60 @@ mod tests {
             }
             other => panic!("unexpected output: {other:?}"),
         }
+        assert!(!path.exists());
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[tokio::test]
+    async fn fix_apply_executes_audited_suggested_fix() {
+        let home = temp_home("agentry_test_fix_action_audited_suggested");
+        let path = home.join(".agents").join("prompts").join("X.md");
+        let finding = audited_finding_with_suggested_fix(
+            "auditor.write",
+            agentry_audit::report::FixAction::FileWrite {
+                path: path.clone(),
+                content: "body".to_string(),
+            },
+        );
+        let ctx = HarnessContext::new(home.clone(), Vec::new(), Vec::new())
+            .with_report(Some(report_with(vec![finding])));
+        let action = FixApplyAction;
+        let ticket = GateTicket::new("fix.apply".to_string(), "t".to_string());
+        let input = ActionInput::FixApply {
+            check_id: "auditor.write".to_string(),
+        };
+        let output = action.execute(&ctx, input, &ticket).await.unwrap();
+        match output {
+            ActionOutput::FixApplied(outcome) => {
+                assert!(outcome.success, "{}", outcome.message);
+                assert_eq!(outcome.check_id, "auditor.write");
+            }
+            other => panic!("unexpected output: {other:?}"),
+        }
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "body");
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[tokio::test]
+    async fn fix_apply_refuses_audited_suggested_fix_outside_allowlist() {
+        let home = temp_home("agentry_test_fix_action_audited_refused");
+        let path = home.join("Documents").join("notes.md");
+        let finding = audited_finding_with_suggested_fix(
+            "auditor.write",
+            agentry_audit::report::FixAction::FileWrite {
+                path: path.clone(),
+                content: "pwned".to_string(),
+            },
+        );
+        let ctx = HarnessContext::new(home.clone(), Vec::new(), Vec::new())
+            .with_report(Some(report_with(vec![finding])));
+        let action = FixApplyAction;
+        let ticket = GateTicket::new("fix.apply".to_string(), "t".to_string());
+        let input = ActionInput::FixApply {
+            check_id: "auditor.write".to_string(),
+        };
+        let err = action.execute(&ctx, input, &ticket).await.unwrap_err();
+        assert!(err.to_string().contains("outside allowlist"));
         assert!(!path.exists());
         std::fs::remove_dir_all(&home).unwrap();
     }
