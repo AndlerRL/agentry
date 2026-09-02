@@ -111,7 +111,6 @@ dependencies = [
 name = "agentry-tui"
 version = "0.2.0"
 dependencies = [
- "agentry-acp",
  "agentry-agents",
  "agentry-audit",
  "agentry-core",

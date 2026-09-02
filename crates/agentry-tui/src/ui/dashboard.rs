@@ -393,10 +393,16 @@ fn draw_agent_detail_enhanced(f: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(Color::DarkGray),
             )));
             let show = versions.iter().take(15).cloned().collect::<Vec<_>>();
-            for v in &show {
+            for (i, v) in show.iter().enumerate() {
+                let cursor = if i == app.version_selected { ">" } else { " " };
+                let style = if i == app.version_selected {
+                    Style::default().fg(Color::Yellow)
+                } else {
+                    Style::default().fg(Color::White)
+                };
                 agent_lines.push(Line::from(Span::styled(
-                    format!("  {}", v),
-                    Style::default().fg(Color::White),
+                    format!(" {} {}", cursor, v),
+                    style,
                 )));
             }
             if versions.len() > 15 {
@@ -440,6 +446,11 @@ fn draw_agent_detail_enhanced(f: &mut Frame, app: &App, area: Rect) {
             agent_lines.push(Line::from(""));
             agent_lines.push(Line::from(Span::styled(
                 format!("  {}", app.status_message.as_deref().unwrap_or("Confirm?")),
+                Style::default().fg(Color::Yellow),
+            )));
+        } else if app.version_list.is_some() {
+            agent_lines.push(Line::from(Span::styled(
+                "  j/k: select version  Enter: install  Esc: cancel",
                 Style::default().fg(Color::Yellow),
             )));
         }
@@ -1539,10 +1550,10 @@ fn draw_help(f: &mut Frame, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("  1-5        ", Style::default().fg(Color::Yellow)),
-            Span::raw("Jump to tab (1=Agents, 2=Prompts, ...)"),
+            Span::raw("Jump to tab (resets selection)"),
         ]),
         Line::from(Span::styled(
-            " ── Agents ──────────────────────",
+            " ── Agents (1) ──────────────────",
             Style::default().fg(Color::DarkGray),
         )),
         Line::from(vec![
@@ -1563,10 +1574,10 @@ fn draw_help(f: &mut Frame, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("  v          ", Style::default().fg(Color::Yellow)),
-            Span::raw("List available versions"),
+            Span::raw("List versions (j/k, Enter installs)"),
         ]),
         Line::from(Span::styled(
-            " ── Prompts ─────────────────────",
+            " ── Prompts (2) ─────────────────",
             Style::default().fg(Color::DarkGray),
         )),
         Line::from(vec![
@@ -1586,7 +1597,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
             Span::raw("Edit prompt (alias)"),
         ]),
         Line::from(Span::styled(
-            " ── Skills ──────────────────────",
+            " ── Skills (3) ──────────────────",
             Style::default().fg(Color::DarkGray),
         )),
         Line::from(vec![
@@ -1606,7 +1617,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
             Span::raw("Open GitHub source"),
         ]),
         Line::from(Span::styled(
-            " ── Sync ────────────────────────",
+            " ── Sync (4) ────────────────────",
             Style::default().fg(Color::DarkGray),
         )),
         Line::from(vec![
@@ -1617,17 +1628,13 @@ fn draw_help(f: &mut Frame, area: Rect) {
             Span::styled("  S          ", Style::default().fg(Color::Yellow)),
             Span::raw("Execute all sync mappings"),
         ]),
-        Line::from(vec![
-            Span::styled("  w          ", Style::default().fg(Color::Yellow)),
-            Span::raw("Generate workflow"),
-        ]),
         Line::from(Span::styled(
-            " ── Audit ───────────────────────",
+            " ── Audit (5) ───────────────────",
             Style::default().fg(Color::DarkGray),
         )),
         Line::from(vec![
             Span::styled("  r          ", Style::default().fg(Color::Yellow)),
-            Span::raw("Re-run audit"),
+            Span::raw("Run audit (auto-runs on first entry)"),
         ]),
         Line::from(vec![
             Span::styled("  f          ", Style::default().fg(Color::Yellow)),
@@ -1636,10 +1643,6 @@ fn draw_help(f: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled("  Enter      ", Style::default().fg(Color::Yellow)),
             Span::raw("Open finding file / show remediation"),
-        ]),
-        Line::from(vec![
-            Span::styled("  j/k        ", Style::default().fg(Color::Yellow)),
-            Span::raw("Navigate findings"),
         ]),
         Line::from(Span::styled(
             " ── General ─────────────────────",
@@ -1665,7 +1668,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
         .border_style(Style::default().fg(Color::Cyan));
 
     let width = 52.min(area.width);
-    let height = 36.min(area.height);
+    let height = 34.min(area.height);
     let x = (area.width.saturating_sub(width)) / 2;
     let y = (area.height.saturating_sub(height)) / 2;
     let popup_area = Rect::new(x, y, width, height);

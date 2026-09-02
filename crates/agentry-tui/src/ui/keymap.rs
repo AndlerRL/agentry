@@ -31,7 +31,6 @@ pub enum TuiAction {
     MethodPrev,
     MethodNext,
     ListVersions,
-    Workflow,
 }
 
 pub struct KeyBinding {
@@ -122,7 +121,6 @@ fn skills_bindings() -> Vec<KeyBinding> {
 }
 
 fn sync_bindings() -> Vec<KeyBinding> {
-    let when = |app: &App| app.tab_index == 3;
     let loaded = |app: &App| app.tab_index == 3 && app.sync_loaded;
     vec![
         scoped(
@@ -138,7 +136,6 @@ fn sync_bindings() -> Vec<KeyBinding> {
             "Execute selected (alias of s)",
             TuiAction::SyncExecuteSelected,
         ),
-        scoped(when, "w", "Workflow", TuiAction::Workflow),
     ]
 }
 
@@ -242,7 +239,7 @@ mod tests {
     #[test]
     fn bindings_for_tab_non_empty_for_all_tabs() {
         let app = App::new();
-        let expected_totals = [23, 17, 18, 17, 16];
+        let expected_totals = [23, 17, 18, 16, 16];
         for tab in 0..5 {
             let bindings = bindings_for_tab(tab, &app);
             assert!(!bindings.is_empty(), "tab {tab} has no bindings");
@@ -356,7 +353,6 @@ mod tests {
                     ("s", TuiAction::SyncExecuteSelected),
                     ("S", TuiAction::SyncExecuteAll),
                     ("Enter", TuiAction::SyncExecuteSelected),
-                    ("w", TuiAction::Workflow),
                 ],
             ),
             (
@@ -404,6 +400,34 @@ mod tests {
         app.tab_index = 0;
         assert_eq!(resolve(4, &app, "r"), None);
         assert_eq!(resolve(4, &app, "q"), Some(TuiAction::Quit));
+    }
+
+    #[test]
+    fn resolve_workflow_key_returns_none_on_all_tabs() {
+        let app = App::new();
+        for tab in 0..5 {
+            assert_eq!(resolve(tab, &app, "w"), None, "tab {tab}");
+        }
+    }
+
+    #[test]
+    fn resolve_method_prev_gated_to_agents_tab() {
+        let app = App::new();
+        assert_eq!(resolve(0, &app, "Left"), Some(TuiAction::MethodPrev));
+        for tab in 1..5 {
+            assert_eq!(resolve(tab, &app, "Left"), None, "tab {tab}");
+        }
+    }
+
+    #[test]
+    fn resolve_insert_inert_outside_skills_tab() {
+        let app = App::new();
+        for tab in [0, 1, 3, 4] {
+            assert_eq!(resolve(tab, &app, "i"), None, "tab {tab}");
+        }
+        let mut skills_app = App::new();
+        skills_app.tab_index = 2;
+        assert_eq!(resolve(2, &skills_app, "i"), Some(TuiAction::Insert));
     }
 
     fn bar_text(lines: &[Line<'static>]) -> String {

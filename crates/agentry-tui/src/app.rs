@@ -44,10 +44,10 @@ pub struct App {
     pub sync_results: Vec<SyncResultEntry>,
     /// True once the sync plan has been loaded for this session
     pub sync_loaded: bool,
+    /// True once the audit has run for this session
+    pub audit_loaded: bool,
     /// OpenClaw workspace data
     pub openclaw_state: Option<OpenClawState>,
-    /// ACP capability matrix
-    pub acp_capabilities: Vec<agentry_acp::protocol::AgentCapability>,
     /// New prompt name (when creating a new prompt)
     pub new_prompt_name: Option<String>,
     /// Delete confirmation pending
@@ -78,11 +78,10 @@ pub struct App {
     pub method_selected: usize,
     /// Agent install/update/remove confirmation pending.
     pub agent_confirm: Option<AgentConfirmAction>,
-    /// When Some, user is typing a version string for install.
-    #[allow(dead_code)]
-    pub version_input: Option<String>,
     /// Cached version list for the selected install method.
     pub version_list: Option<Vec<String>>,
+    /// Selected index into version_list while choosing a version.
+    pub version_selected: usize,
     /// Error fetching versions.
     pub version_list_error: Option<String>,
     pub audit_report: Option<agentry_audit::report::AuditReport>,
@@ -162,8 +161,8 @@ impl App {
             agent_skills_dirs: Vec::new(),
             sync_results: Vec::new(),
             sync_loaded: false,
+            audit_loaded: false,
             openclaw_state: None,
-            acp_capabilities: Vec::new(),
             new_prompt_name: None,
             delete_confirm: None,
             home_dir,
@@ -179,8 +178,8 @@ impl App {
             needs_terminal_clear: false,
             method_selected: 0,
             agent_confirm: None,
-            version_input: None,
             version_list: None,
+            version_selected: 0,
             version_list_error: None,
             audit_report: None,
             audit_filter: None,
@@ -206,9 +205,6 @@ impl App {
 
         // Discover OpenClaw workspaces
         self.discover_openclaw();
-
-        // Build ACP capability matrix
-        self.discover_capabilities();
 
         // Main event loop
         while !self.should_quit {
@@ -274,12 +270,6 @@ impl App {
                 });
                 self.status_message = Some(format!("OpenClaw: {}", e));
             }
-        }
-    }
-
-    fn discover_capabilities(&mut self) {
-        if let Ok(caps) = agentry_acp::router::build_capability_matrix(&self.home_dir) {
-            self.acp_capabilities = caps;
         }
     }
 
@@ -511,6 +501,7 @@ impl App {
             KeyCode::Right => "Right".to_string(),
             KeyCode::Up => "Up".to_string(),
             KeyCode::Down => "Down".to_string(),
+            KeyCode::Esc => "Esc".to_string(),
             _ => return Ok(()),
         };
 
@@ -524,7 +515,9 @@ impl App {
             Some(TuiAction::PrevTab) => self.prev_tab(),
             Some(TuiAction::JumpTab(i)) => {
                 self.tab_index = i;
+                self.reset_tab_selection();
                 self.maybe_autoload_sync();
+                self.maybe_autoload_audit();
             }
             Some(TuiAction::ListNext) => self.list_next(),
             Some(TuiAction::ListPrev) => self.list_prev(),
@@ -545,14 +538,17 @@ impl App {
             Some(TuiAction::MethodPrev) => self.method_prev(),
             Some(TuiAction::MethodNext) => self.method_next(),
             Some(TuiAction::ListVersions) => self.on_list_versions(),
-            Some(TuiAction::Workflow) => self.on_workflow(),
             None => match key.code {
                 KeyCode::Char('s') => self.execute_selected_sync(),
-                KeyCode::Char('w') => self.on_workflow(),
                 KeyCode::Char('u') => self.on_update(),
-                KeyCode::Char('i') => self.on_insert(),
-                KeyCode::Left => self.method_prev(),
                 KeyCode::Right => self.method_next(),
+                KeyCode::Esc => {
+                    if self.version_list.is_some() {
+                        self.version_list = None;
+                        self.version_selected = 0;
+                        self.status_message = Some("Version selection cancelled".into());
+                    }
+                }
                 _ => {}
             },
         }
@@ -561,9 +557,9 @@ impl App {
 
     fn next_tab(&mut self) {
         self.tab_index = (self.tab_index + 1) % 5;
-        self.list_selected = 0;
-        self.method_selected = 0;
+        self.reset_tab_selection();
         self.maybe_autoload_sync();
+        self.maybe_autoload_audit();
     }
 
     fn prev_tab(&mut self) {
@@ -572,9 +568,16 @@ impl App {
         } else {
             self.tab_index - 1
         };
+        self.reset_tab_selection();
+        self.maybe_autoload_sync();
+        self.maybe_autoload_audit();
+    }
+
+    fn reset_tab_selection(&mut self) {
         self.list_selected = 0;
         self.method_selected = 0;
-        self.maybe_autoload_sync();
+        self.version_list = None;
+        self.version_selected = 0;
     }
 
     fn maybe_autoload_sync(&mut self) {
@@ -584,7 +587,21 @@ impl App {
         }
     }
 
+    fn maybe_autoload_audit(&mut self) {
+        if self.tab_index == 4 && !self.audit_loaded {
+            self.on_run_audit();
+            self.audit_loaded = true;
+        }
+    }
+
     fn list_next(&mut self) {
+        if self.version_list.is_some() {
+            let max = self.version_list.as_ref().map(|v| v.len()).unwrap_or(0);
+            if max > 0 && self.version_selected < max - 1 {
+                self.version_selected += 1;
+            }
+            return;
+        }
         let max = self.list_max();
         if max > 0 && self.list_selected < max - 1 {
             self.list_selected += 1;
@@ -592,9 +609,48 @@ impl App {
     }
 
     fn list_prev(&mut self) {
+        if self.version_list.is_some() {
+            self.version_selected = self.version_selected.saturating_sub(1);
+            return;
+        }
         if self.list_selected > 0 {
             self.list_selected -= 1;
         }
+    }
+
+    /// Build the confirm action installing the currently selected version,
+    /// then close the version picker.
+    fn confirm_selected_version(&mut self) {
+        let Some(agent) = self.detected_agents.get(self.list_selected) else {
+            self.version_list = None;
+            self.version_selected = 0;
+            return;
+        };
+        let Some(method) = agent.spec.install_methods.get(self.method_selected) else {
+            self.version_list = None;
+            self.version_selected = 0;
+            return;
+        };
+        let version = self
+            .version_list
+            .as_ref()
+            .and_then(|v| v.get(self.version_selected))
+            .cloned();
+        match version {
+            Some(v) => {
+                self.agent_confirm = Some(AgentConfirmAction::Install {
+                    agent_id: agent.spec.id.clone(),
+                    method: method.clone(),
+                    version: Some(v.clone()),
+                });
+                self.status_message = Some(format!("Install {} {}? (y/n)", agent.spec.name, v));
+            }
+            None => {
+                self.status_message = Some("No version selected".into());
+            }
+        }
+        self.version_list = None;
+        self.version_selected = 0;
     }
 
     /// Total number of items in the current tab's list (including headers/actions).
@@ -1057,6 +1113,10 @@ impl App {
                     }
                     return;
                 }
+                if self.version_list.is_some() {
+                    self.confirm_selected_version();
+                    return;
+                }
                 // Agents tab - install via selected method
                 if let Some(agent) = self.detected_agents.get(self.list_selected) {
                     if let Some(method) = agent.spec.install_methods.get(self.method_selected) {
@@ -1312,6 +1372,7 @@ impl App {
         let report = agentry_audit::engine::run_audit(&ctx);
         let finding_count = report.summary.total_findings;
         self.audit_report = Some(report);
+        self.audit_loaded = true;
         self.list_selected = 0;
         self.status_message = Some(format!("Audit complete: {} findings", finding_count));
     }
@@ -1325,29 +1386,30 @@ impl App {
     }
 
     fn on_insert(&mut self) {
-        if self.tab_index == 2 {
-            if let Some(idx) = self.selected_skill_index() {
-                if let Some(ref hub) = self.skill_hub {
-                    let skills: Vec<_> = hub.skills.values().collect();
-                    if idx < skills.len() {
-                        let skill = skills[idx];
-                        if !skill.installed {
-                            self.skill_confirm =
-                                Some(SkillConfirmAction::Install(skill.name.clone()));
-                            self.status_message = Some(format!("Install '{}'? (y/n)", skill.name));
-                        } else {
-                            self.status_message =
-                                Some(format!("'{}' is already installed", skill.name));
-                        }
+        if self.tab_index != 2 {
+            return;
+        }
+        if let Some(idx) = self.selected_skill_index() {
+            if let Some(ref hub) = self.skill_hub {
+                let skills: Vec<_> = hub.skills.values().collect();
+                if idx < skills.len() {
+                    let skill = skills[idx];
+                    if !skill.installed {
+                        self.skill_confirm = Some(SkillConfirmAction::Install(skill.name.clone()));
+                        self.status_message = Some(format!("Install '{}'? (y/n)", skill.name));
+                    } else {
+                        self.status_message =
+                            Some(format!("'{}' is already installed", skill.name));
                     }
                 }
             }
-        } else {
-            self.on_new();
         }
     }
 
     fn method_prev(&mut self) {
+        if self.tab_index != 0 {
+            return;
+        }
         if self.method_selected > 0 {
             self.method_selected -= 1;
         }
@@ -1411,6 +1473,7 @@ impl App {
                             self.version_list_error = Some("No versions found".into());
                         } else {
                             self.version_list = Some(versions);
+                            self.version_selected = 0;
                             self.status_message =
                                 Some("Versions loaded. Select with j/k, Enter to confirm".into());
                         }
@@ -1700,50 +1763,6 @@ impl App {
             } else {
                 self.status_message = Some("OpenClaw not installed".into());
             }
-        }
-    }
-
-    fn on_workflow(&mut self) {
-        if self.tab_index == 3 {
-            if !self.acp_capabilities.is_empty() {
-                let task = if let Some(entry) = self.selected_sync_entry() {
-                    format!("Sync {} to {}", entry.prompt_name, entry.agent_id)
-                } else {
-                    "Sync all prompts".to_string()
-                };
-                let decomp =
-                    agentry_acp::orchestrator::decompose_task(&task, &self.acp_capabilities);
-                let subtask_count = decomp.subtasks.len();
-                let agent_names: Vec<_> = decomp
-                    .subtasks
-                    .iter()
-                    .map(|s| s.assigned_agent.clone())
-                    .collect();
-
-                // Save the generated workflow
-                let workflow_dir = self.home_dir.join(".agents").join("workflows");
-                if let Err(e) = std::fs::create_dir_all(&workflow_dir) {
-                    self.error_message = Some(format!("Failed to create workflow dir: {}", e));
-                }
-                let workflow_path = workflow_dir.join(format!("{}.lobster", decomp.workflow.name));
-                if let Err(e) =
-                    agentry_acp::orchestrator::save_workflow(&decomp.workflow, &workflow_path)
-                {
-                    self.status_message = Some(format!("Workflow save error: {}", e));
-                } else {
-                    self.status_message = Some(format!(
-                        "Workflow: {} subtask(s) → {} (saved to {})",
-                        subtask_count,
-                        agent_names.join(", "),
-                        workflow_path.display()
-                    ));
-                }
-            } else {
-                self.status_message = Some("No agent capabilities found".into());
-            }
-        } else {
-            self.status_message =
-                Some("Workflow: switch to Sync tab (4) to generate workflows".into());
         }
     }
 }
@@ -2375,5 +2394,204 @@ mod tests {
         press(&mut app, KeyCode::Enter);
         assert!(app.sync_confirm.is_some());
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn audit_autoruns_once_on_first_tab_entry() {
+        let mut app = App::new();
+        app.home_dir = std::env::temp_dir().join("agentry-test-audit-auto");
+        let _ = std::fs::remove_dir_all(&app.home_dir);
+        app.prompts = vec![sync_test_prompt("alpha")];
+        assert!(app.audit_report.is_none());
+        assert!(!app.audit_loaded);
+
+        app.next_tab();
+        app.next_tab();
+        app.next_tab();
+        app.next_tab();
+        assert_eq!(app.tab_index, 4);
+        assert!(app.audit_loaded);
+        assert!(app.audit_report.is_some());
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|m| m.starts_with("Audit complete: ")));
+
+        let findings_after_first = app.audit_report.as_ref().map(|r| r.summary.total_findings);
+        app.prev_tab();
+        app.next_tab();
+        assert_eq!(
+            app.audit_report.as_ref().map(|r| r.summary.total_findings),
+            findings_after_first,
+            "second entry must not re-run the audit"
+        );
+
+        let _ = std::fs::remove_dir_all(&app.home_dir);
+    }
+
+    #[test]
+    fn audit_autoruns_on_jump_tab_entry() {
+        let mut app = App::new();
+        app.home_dir = std::env::temp_dir().join("agentry-test-audit-jump");
+        let _ = std::fs::remove_dir_all(&app.home_dir);
+        app.prompts = vec![sync_test_prompt("alpha")];
+
+        press(&mut app, KeyCode::Char('5'));
+        assert_eq!(app.tab_index, 4);
+        assert!(app.audit_loaded);
+        assert!(app.audit_report.is_some());
+
+        let _ = std::fs::remove_dir_all(&app.home_dir);
+    }
+
+    #[test]
+    fn jump_tab_resets_selection() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![sync_agent("claude-code", ".claude", "CLAUDE.md")];
+        app.list_selected = 1;
+        app.method_selected = 1;
+
+        press(&mut app, KeyCode::Char('2'));
+        assert_eq!(app.tab_index, 1);
+        assert_eq!(app.list_selected, 0);
+        assert_eq!(app.method_selected, 0);
+
+        press(&mut app, KeyCode::Char('1'));
+        assert_eq!(app.list_selected, 0);
+        assert_eq!(app.method_selected, 0);
+    }
+
+    #[test]
+    fn left_arrow_inert_off_agents_tab() {
+        let mut app = App::new();
+        app.tab_index = 3;
+        app.method_selected = 1;
+        press(&mut app, KeyCode::Left);
+        assert_eq!(
+            app.method_selected, 1,
+            "Left must not move method off tab 0"
+        );
+
+        app.tab_index = 0;
+        app.method_selected = 1;
+        press(&mut app, KeyCode::Left);
+        assert_eq!(app.method_selected, 0, "Left moves method on tab 0");
+    }
+
+    #[test]
+    fn i_key_inert_off_skills_tab() {
+        let mut app = App::new();
+        app.tab_index = 1;
+        press(&mut app, KeyCode::Char('i'));
+        assert!(
+            app.new_prompt_name.is_none(),
+            "i must not open new-prompt outside Skills"
+        );
+        assert!(app.skill_confirm.is_none());
+    }
+
+    #[test]
+    fn w_key_inert_on_all_tabs() {
+        for tab in 0..5 {
+            let mut app = App::new();
+            app.tab_index = tab;
+            app.home_dir = std::env::temp_dir().join("agentry-test-w-key");
+            press(&mut app, KeyCode::Char('w'));
+            assert!(app.status_message.is_none(), "tab {tab}: w must be inert");
+            assert!(!app.home_dir.join(".agents").join("workflows").exists());
+        }
+        let _ = std::fs::remove_dir_all(std::env::temp_dir().join("agentry-test-w-key"));
+    }
+
+    fn version_flow_agent() -> DetectedAgent {
+        DetectedAgent {
+            spec: agentry_core::models::AgentSpec {
+                id: "codex".to_string(),
+                name: "codex".to_string(),
+                cli_binary: "codex".to_string(),
+                config_dir: ".codex".to_string(),
+                prompt_filename: "AGENTS.md".to_string(),
+                prompt_format: agentry_core::models::PromptFormat::PlainMd,
+                skills_dir_name: None,
+                max_size: None,
+                install_methods: vec![agentry_core::models::InstallMethod::Npm {
+                    package: "codex".to_string(),
+                }],
+            },
+            installed: false,
+            version: None,
+            config_dir_exists: true,
+            prompt_file_exists: false,
+            skills_dir: None,
+            skills_symlink_pattern: None,
+            installed_skills: Vec::new(),
+            detected_methods: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn enter_installs_selected_version_when_version_list_loaded() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![version_flow_agent()];
+        app.version_list = Some(vec!["1.0.0".to_string(), "2.1.3".to_string()]);
+        app.version_selected = 1;
+
+        press(&mut app, KeyCode::Enter);
+
+        match app.agent_confirm {
+            Some(AgentConfirmAction::Install {
+                ref agent_id,
+                ref version,
+                ..
+            }) => {
+                assert_eq!(agent_id, "codex");
+                assert_eq!(version.as_deref(), Some("2.1.3"));
+            }
+            other => panic!("expected Install confirm, got {:?}", other),
+        }
+        assert!(app.version_list.is_none(), "picker must close");
+        assert_eq!(app.version_selected, 0);
+    }
+
+    #[test]
+    fn esc_cancels_version_selection() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![version_flow_agent()];
+        app.version_list = Some(vec!["1.0.0".to_string()]);
+        app.version_selected = 0;
+
+        press(&mut app, KeyCode::Esc);
+
+        assert!(app.agent_confirm.is_none());
+        assert!(app.version_list.is_none());
+        assert_eq!(app.version_selected, 0);
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("Version selection cancelled")
+        );
+    }
+
+    #[test]
+    fn jk_moves_version_selection_while_loaded() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![version_flow_agent()];
+        app.version_list = Some(vec![
+            "1.0.0".to_string(),
+            "2.0.0".to_string(),
+            "3.0.0".to_string(),
+        ]);
+
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Char('j'));
+        assert_eq!(app.version_selected, 2);
+        press(&mut app, KeyCode::Char('j'));
+        assert_eq!(app.version_selected, 2, "clamped at last version");
+        press(&mut app, KeyCode::Char('k'));
+        assert_eq!(app.version_selected, 1);
+        assert_eq!(app.list_selected, 0, "agent list must not move");
     }
 }
