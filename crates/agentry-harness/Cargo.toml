@@ -9,7 +9,6 @@ repository.workspace = true
 
 [dependencies]
 agentry-core = { workspace = true }
-agentry-agents = { workspace = true }
 agentry-audit = { workspace = true }
 agentry-sync = { workspace = true }
 serde = { workspace = true }

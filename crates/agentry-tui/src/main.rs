@@ -253,7 +253,7 @@ async fn cmd_sync(prompt_name: Option<String>, all: bool, dry_run: bool) -> Resu
         return Ok(());
     }
 
-    let registry = build_harness_registry();
+    let registry = agentry_harness::HarnessRegistry::with_default_actions();
     for prompt in &prompts_to_sync {
         println!("Syncing: {}", prompt.name);
         let ctx =
@@ -275,23 +275,6 @@ async fn cmd_sync(prompt_name: Option<String>, all: bool, dry_run: bool) -> Resu
     }
 
     Ok(())
-}
-
-fn build_harness_registry() -> agentry_harness::HarnessRegistry {
-    let mut registry = agentry_harness::HarnessRegistry::new();
-    registry.register(Box::new(
-        agentry_harness::actions::sync_action::SyncExecuteAction,
-    ));
-    registry.register(Box::new(
-        agentry_harness::actions::audit_action::AuditRunAction,
-    ));
-    registry.register(Box::new(
-        agentry_harness::actions::fix_action::FixApplyAction,
-    ));
-    registry.register(Box::new(
-        agentry_harness::actions::fix_action::FixApplyAllAction,
-    ));
-    registry
 }
 
 async fn cmd_skills(action: Option<SkillsCommands>) -> Result<()> {
@@ -715,7 +698,7 @@ async fn cmd_audit(
         }
         let before_count = report.summary.total_findings;
         let outcomes = if yes {
-            let registry = build_harness_registry();
+            let registry = agentry_harness::HarnessRegistry::with_default_actions();
             let ctx = agentry_harness::HarnessContext::new(
                 home.clone(),
                 agentry_agents::detect_all_agents().await,

@@ -6,7 +6,6 @@ use ratatui::{backend::Backend, Frame, Terminal};
 
 use crate::ui;
 use crate::ui::keymap::{resolve, TuiAction};
-
 /// A single sync result for display in the Sync tab.
 #[derive(Debug, Clone)]
 pub struct SyncResultEntry {
@@ -22,23 +21,6 @@ pub struct SyncResultEntry {
 pub struct OpenClawState {
     pub workspaces: Vec<agentry_openclaw::discovery::OpenClawWorkspace>,
     pub installed: bool,
-}
-
-fn build_harness_registry() -> agentry_harness::HarnessRegistry {
-    let mut registry = agentry_harness::HarnessRegistry::new();
-    registry.register(Box::new(
-        agentry_harness::actions::sync_action::SyncExecuteAction,
-    ));
-    registry.register(Box::new(
-        agentry_harness::actions::audit_action::AuditRunAction,
-    ));
-    registry.register(Box::new(
-        agentry_harness::actions::fix_action::FixApplyAction,
-    ));
-    registry.register(Box::new(
-        agentry_harness::actions::fix_action::FixApplyAllAction,
-    ));
-    registry
 }
 
 /// Application state machine: Intro → Dashboard → (various tabs) → Quit
@@ -225,7 +207,7 @@ impl App {
             version_list_error: None,
             audit_report: None,
             audit_filter: None,
-            harness: build_harness_registry(),
+            harness: agentry_harness::HarnessRegistry::with_default_actions(),
             harness_confirm: None,
         }
     }
@@ -1419,23 +1401,21 @@ impl App {
     fn invoke_harness(&mut self, pending: HarnessPendingInvocation) {
         let ctx = self.harness_context();
         let action_id = pending.action_id.clone();
-        let result = match tokio::runtime::Handle::try_current() {
-            Ok(handle) => handle.block_on(self.harness.invoke_confirmed(
-                &ctx,
-                &action_id,
-                pending.input,
-            )),
-            Err(_) => {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("harness runtime");
-                rt.block_on(
-                    self.harness
-                        .invoke_confirmed(&ctx, &action_id, pending.input),
-                )
+        let result = tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build();
+            match rt {
+                Ok(rt) => rt.block_on(self.harness.invoke_confirmed(
+                    &ctx,
+                    &action_id,
+                    pending.input,
+                )),
+                Err(err) => Err(agentry_harness::HarnessError::ExecutionFailed(format!(
+                    "harness runtime unavailable: {err}"
+                ))),
             }
-        };
+        });
         match result {
             Ok(output) => self.apply_harness_output(&action_id, output),
             Err(err) => {
@@ -1479,17 +1459,29 @@ impl App {
     fn post_fix_feedback(&mut self, outcomes: Vec<agentry_audit::fix::FixOutcome>) {
         let applied = outcomes.iter().filter(|o| o.success).count();
         let attempted = outcomes.len();
-        for outcome in &outcomes {
-            if outcome.success {
-                if let Some(report) = &mut self.audit_report {
-                    agentry_audit::history::apply_feedback(
-                        report,
-                        &agentry_audit::history::load_history(&self.home_dir).unwrap_or_default(),
-                    );
-                }
+        let succeeded_keys: Vec<(String, Option<String>)> = outcomes
+            .iter()
+            .filter(|o| o.success)
+            .map(|o| (o.check_id.clone(), o.agent_id.clone()))
+            .collect();
+        if let Some(pre_fix_report) = self.audit_report.clone() {
+            if let Err(err) = agentry_audit::history::append_history(
+                &self.home_dir,
+                &pre_fix_report,
+                &succeeded_keys,
+            ) {
+                self.error_message = Some(format!("failed to append audit history: {err}"));
             }
         }
         self.rerun_audit_after_fix();
+        if let Some(history) = agentry_audit::history::load_history(&self.home_dir)
+            .ok()
+            .or_else(|| Some(Vec::new()))
+        {
+            if let Some(report) = &mut self.audit_report {
+                agentry_audit::history::apply_feedback(report, &history);
+            }
+        }
         let remaining = self
             .audit_report
             .as_ref()
@@ -1513,10 +1505,34 @@ impl App {
     }
 
     fn rerun_audit_after_fix(&mut self) {
-        let ctx = agentry_audit::engine::build_context(&self.home_dir, self.prompts.clone());
-        let report = agentry_audit::engine::run_audit(&ctx);
-        self.audit_report = Some(report);
-        self.audit_loaded = true;
+        let ctx = self.harness_context();
+        let result = tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build();
+            match rt {
+                Ok(rt) => rt.block_on(self.harness.invoke_confirmed(
+                    &ctx,
+                    "audit.run",
+                    agentry_harness::ActionInput::AuditRun { agent_id: None },
+                )),
+                Err(err) => Err(agentry_harness::HarnessError::ExecutionFailed(format!(
+                    "harness runtime unavailable: {err}"
+                ))),
+            }
+        });
+        match result {
+            Ok(agentry_harness::ActionOutput::AuditCompleted(report)) => {
+                self.audit_report = Some(report);
+                self.audit_loaded = true;
+            }
+            Ok(_) => {
+                self.error_message = Some("audit.run returned an unexpected output".to_string());
+            }
+            Err(err) => {
+                self.error_message = Some(format!("audit.run failed: {err}"));
+            }
+        }
     }
 
     fn on_run_audit(&mut self) {

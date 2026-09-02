@@ -129,7 +129,7 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("unknown agent id"));
+        assert!(matches!(err, HarnessError::Unsupported(_)));
         std::fs::remove_dir_all(&home).unwrap();
     }
 
@@ -143,7 +143,7 @@ mod tests {
             .execute(&ctx, ActionInput::FixApplyAll, &ticket)
             .await
             .unwrap_err();
-        assert!(matches!(err, HarnessError::InvalidInput(_)));
+        assert!(matches!(err, HarnessError::Unsupported(_)));
         std::fs::remove_dir_all(&home).unwrap();
     }
 }

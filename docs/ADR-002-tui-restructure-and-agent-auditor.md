@@ -137,6 +137,8 @@ The TUI renders the confirmation from `describe()`; the CLI uses the same text. 
 
 `HarnessRegistry` maps action ids to implementations and is the **sole issuer of `GateTicket`s** (§1.2) — its invoke path runs the confirmation flow, mints the ticket, and records consent. The TUI keymap (§3), the CLI subcommands, and the P4 ACP worker all resolve actions through the registry — the same single-source-of-truth discipline as the keymap bar. `agentry harness actions` lists the registry (discoverability for humans and for agentic consumers of `--json` surfaces).
 
+**Trust boundary (Stage 2):** `invoke_confirmed` records the consent entry unconditionally — it assumes the **caller** has already obtained user consent (TUI y/n prompt, CLI `--yes` flag) and treats the ledger as an **audit trail, not an enforcement mechanism**. The registry never asks the user anything; it mints a ticket and executes. Consequence for P3: any agentic action (`auditor.review` and successors) must add a **pre-existing-consent check** before execution — the worker verifies a consent record for the specific action exists *before* invoking, rather than trusting the caller's assertion — because an agentic caller cannot be assumed to have prompted the user.
+
 #### 1.4 Existing features become harness actions
 
 | Action id | Kind | Wraps |

@@ -20,6 +20,15 @@ impl HarnessRegistry {
         }
     }
 
+    pub fn with_default_actions() -> Self {
+        let mut registry = Self::new();
+        registry.register(Box::new(crate::actions::sync_action::SyncExecuteAction));
+        registry.register(Box::new(crate::actions::audit_action::AuditRunAction));
+        registry.register(Box::new(crate::actions::fix_action::FixApplyAction));
+        registry.register(Box::new(crate::actions::fix_action::FixApplyAllAction));
+        registry
+    }
+
     pub fn register(&mut self, action: Box<dyn HarnessAction>) {
         self.actions.push(action);
     }
