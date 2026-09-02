@@ -1,5 +1,6 @@
 mod dashboard;
 mod intro;
+pub mod keymap;
 
 use ratatui::layout::Rect;
 

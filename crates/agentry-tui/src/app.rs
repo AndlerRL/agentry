@@ -5,6 +5,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent};
 use ratatui::{backend::Backend, Frame, Terminal};
 
 use crate::ui;
+use crate::ui::keymap::{resolve, TuiAction};
 
 /// A single sync result for display in the Sync tab.
 #[derive(Debug, Clone)]
@@ -470,48 +471,55 @@ impl App {
             return Ok(());
         }
 
-        match key.code {
-            // Global keybindings
-            KeyCode::Char('q') => {
+        let key_string = match key.code {
+            KeyCode::Char(c) => c.to_string(),
+            KeyCode::Tab => "Tab".to_string(),
+            KeyCode::BackTab => "BackTab".to_string(),
+            KeyCode::Enter => "Enter".to_string(),
+            KeyCode::Left => "Left".to_string(),
+            KeyCode::Right => "Right".to_string(),
+            KeyCode::Up => "Up".to_string(),
+            KeyCode::Down => "Down".to_string(),
+            _ => return Ok(()),
+        };
+
+        match resolve(self.tab_index, self, &key_string) {
+            Some(TuiAction::Quit) => {
                 self.mode = AppMode::Quit;
                 self.should_quit = true;
             }
-            KeyCode::Char('?') => self.show_help = !self.show_help,
-            KeyCode::Tab => self.next_tab(),
-            KeyCode::BackTab => self.prev_tab(),
-            KeyCode::Char('1') => self.tab_index = 0,
-            KeyCode::Char('2') => self.tab_index = 1,
-            KeyCode::Char('3') => self.tab_index = 2,
-            KeyCode::Char('4') => self.tab_index = 3,
-            KeyCode::Char('5') => self.tab_index = 4,
-            KeyCode::Char('6') => self.tab_index = 5,
-            // Navigation
-            KeyCode::Char('j') | KeyCode::Down => self.list_next(),
-            KeyCode::Char('k') | KeyCode::Up => self.list_prev(),
-            // Actions
-            KeyCode::Enter => self.on_enter(),
-            KeyCode::Char('n') => self.on_new(),
-            KeyCode::Char('d') => self.on_delete(),
-            KeyCode::Char('s') => self.on_sync(),
-            KeyCode::Char('e') => self.on_edit(),
-            KeyCode::Char('i') => self.on_insert(),
-            KeyCode::Char('u') => self.on_update(),
-            KeyCode::Char('r') => {
-                if self.tab_index == 5 {
-                    self.on_run_audit();
-                } else {
-                    self.on_remove();
-                }
-            }
-            KeyCode::Char('g') => self.on_github(),
-            KeyCode::Char('c') => self.on_create_workspace(),
-            KeyCode::Char('a') => self.on_add_agent(),
-            KeyCode::Left => self.method_prev(),
-            KeyCode::Right => self.method_next(),
-            KeyCode::Char('v') => self.on_list_versions(),
-            KeyCode::Char('w') => self.on_workflow(),
-            KeyCode::Char('f') => self.on_cycle_audit_filter(),
-            _ => {}
+            Some(TuiAction::Help) => self.show_help = !self.show_help,
+            Some(TuiAction::NextTab) => self.next_tab(),
+            Some(TuiAction::PrevTab) => self.prev_tab(),
+            Some(TuiAction::JumpTab(i)) => self.tab_index = i,
+            Some(TuiAction::ListNext) => self.list_next(),
+            Some(TuiAction::ListPrev) => self.list_prev(),
+            Some(TuiAction::Enter) => self.on_enter(),
+            Some(TuiAction::New) => self.on_new(),
+            Some(TuiAction::Delete) => self.on_delete(),
+            Some(TuiAction::Sync) => self.on_sync(),
+            Some(TuiAction::Edit) => self.on_edit(),
+            Some(TuiAction::Insert) => self.on_insert(),
+            Some(TuiAction::Update) => self.on_update(),
+            Some(TuiAction::Remove) => self.on_remove(),
+            Some(TuiAction::RunAudit) => self.on_run_audit(),
+            Some(TuiAction::CycleAuditFilter) => self.on_cycle_audit_filter(),
+            Some(TuiAction::Github) => self.on_github(),
+            Some(TuiAction::CreateWorkspace) => self.on_create_workspace(),
+            Some(TuiAction::AddAgent) => self.on_add_agent(),
+            Some(TuiAction::MethodPrev) => self.method_prev(),
+            Some(TuiAction::MethodNext) => self.method_next(),
+            Some(TuiAction::ListVersions) => self.on_list_versions(),
+            Some(TuiAction::Workflow) => self.on_workflow(),
+            None => match key.code {
+                KeyCode::Char('s') => self.on_sync(),
+                KeyCode::Char('w') => self.on_workflow(),
+                KeyCode::Char('u') => self.on_update(),
+                KeyCode::Char('i') => self.on_insert(),
+                KeyCode::Left => self.method_prev(),
+                KeyCode::Right => self.method_next(),
+                _ => {}
+            },
         }
         Ok(())
     }
@@ -1829,5 +1837,76 @@ mod tests {
     fn finding_edit_path_none_without_fix() {
         let f = finding(Severity::Info, "prompt.missing");
         assert_eq!(App::finding_edit_path(&f), None);
+    }
+
+    fn press(app: &mut App, code: KeyCode) {
+        app.handle_key(KeyEvent::new(code, crossterm::event::KeyModifiers::empty()))
+            .unwrap();
+    }
+
+    #[test]
+    fn handle_key_r_dual_maps_run_audit_vs_remove() {
+        let mut audit_app = audit_app(report_with(Vec::new()));
+        audit_app.home_dir = std::env::temp_dir().join("agentry-test-r-dual");
+        press(&mut audit_app, KeyCode::Char('r'));
+        assert!(audit_app.audit_report.is_some());
+        assert!(audit_app
+            .status_message
+            .as_deref()
+            .is_some_and(|m| m.starts_with("Audit complete: ")));
+
+        let mut agents_app = App::new();
+        agents_app.tab_index = 0;
+        agents_app.detected_agents = vec![DetectedAgent {
+            spec: agentry_core::models::AgentSpec {
+                id: "codex".to_string(),
+                name: "codex".to_string(),
+                cli_binary: "codex".to_string(),
+                config_dir: ".codex".to_string(),
+                prompt_filename: "AGENTS.md".to_string(),
+                prompt_format: agentry_core::models::PromptFormat::PlainMd,
+                skills_dir_name: None,
+                max_size: None,
+                install_methods: vec![agentry_core::models::InstallMethod::Brew {
+                    formula: "codex".to_string(),
+                    cask: false,
+                }],
+            },
+            installed: true,
+            version: None,
+            config_dir_exists: true,
+            prompt_file_exists: true,
+            skills_dir: None,
+            skills_symlink_pattern: None,
+            installed_skills: Vec::new(),
+            detected_methods: vec![agentry_core::models::InstallMethod::Brew {
+                formula: "codex".to_string(),
+                cask: false,
+            }],
+        }];
+        press(&mut agents_app, KeyCode::Char('r'));
+        assert!(agents_app.agent_confirm.is_some());
+        assert_eq!(
+            agents_app.status_message.as_deref(),
+            Some("Remove codex via Homebrew? (y/n)")
+        );
+    }
+
+    #[test]
+    fn handle_key_dispatches_via_keymap_and_ignores_other_tabs() {
+        let mut app = App::new();
+        app.tab_index = 3;
+        press(&mut app, KeyCode::Char('f'));
+        assert_eq!(app.audit_filter, None);
+        app.tab_index = 5;
+        press(&mut app, KeyCode::Char('f'));
+        assert_eq!(
+            app.audit_filter,
+            Some(agentry_audit::report::Severity::Critical)
+        );
+        press(&mut app, KeyCode::Char('q'));
+        assert!(app.should_quit);
+        assert_eq!(app.mode, AppMode::Quit);
+        press(&mut app, KeyCode::Char('?'));
     }
 }
