@@ -1672,11 +1672,19 @@ impl App {
                     AgentConfirmAction::Remove { .. } => "Removed",
                 };
                 self.status_message = Some(format!("{} {}", verb, action.agent_id()));
-                // Re-detect agents synchronously (in a TUI context we use block_on)
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    self.detected_agents = agentry_agents::detect_all_agents().await;
+                let result = tokio::task::block_in_place(|| {
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .map(|rt| rt.block_on(async { agentry_agents::detect_all_agents().await }))
+                        .map_err(|e| e.to_string())
                 });
+                match result {
+                    Ok(agents) => self.detected_agents = agents,
+                    Err(e) => {
+                        self.error_message = Some(format!("Failed to re-detect agents: {}", e));
+                    }
+                }
             }
             Ok(_) => {
                 self.error_message = Some(format!("Command failed for {}", action.agent_id()));
