@@ -127,10 +127,10 @@ pub fn assert_ticket_for(
     home_dir: &std::path::Path,
 ) -> Result<(), HarnessError> {
     if ticket.action_id != action_id {
-        return Err(HarnessError::ExecutionFailed(format!(
-            "gate ticket '{}' does not authorize action '{}'",
-            ticket.action_id, action_id
-        )));
+        return Err(HarnessError::TicketMismatch {
+            ticket_id: ticket.action_id.clone(),
+            action_id: action_id.to_string(),
+        });
     }
     if !consent_id_matches(home_dir, &ticket.consent_id)? {
         return Err(HarnessError::ExecutionFailed(format!(
@@ -209,7 +209,7 @@ mod tests {
         let consent_id = record_consent(&home, "audit.run", "granted").unwrap();
         let ticket = GateTicket::new("fix.apply".to_string(), consent_id);
         let err = assert_ticket_for(&ticket, "audit.run", &home).unwrap_err();
-        assert!(err.to_string().contains("does not authorize"));
+        assert!(matches!(err, HarnessError::TicketMismatch { .. }));
         std::fs::remove_dir_all(&home).unwrap();
     }
 

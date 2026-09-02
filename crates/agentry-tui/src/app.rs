@@ -2647,7 +2647,7 @@ mod tests {
     }
 
     #[test]
-    fn fix_key_A_applies_all_through_harness() {
+    fn fix_key_a_applies_all_through_harness() {
         let dir = std::env::temp_dir().join(format!("agentry-fix-key-all-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let first = dir.join("first.md");

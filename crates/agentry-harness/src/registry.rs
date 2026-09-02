@@ -142,7 +142,6 @@ mod tests {
     async fn prepare_returns_pending_without_side_effects() {
         let (registry, calls) = fixture_registry();
         let home = temp_home("agentry_test_reg_prepare");
-        let ctx = HarnessContext::new(home.clone(), Vec::new(), Vec::new());
         let pending = registry
             .prepare("test.action", &ActionInput::FixApplyAll)
             .unwrap();
@@ -150,7 +149,7 @@ mod tests {
         assert_eq!(pending.confirmation, Confirmation::Single);
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         assert!(
-            crate::gate::consent_path(&home).exists() == false,
+            !crate::gate::consent_path(&home).exists(),
             "prepare must not record consent"
         );
         std::fs::remove_dir_all(&home).unwrap();
@@ -160,7 +159,6 @@ mod tests {
     async fn prepare_fails_on_unknown_action() {
         let (registry, _) = fixture_registry();
         let home = temp_home("agentry_test_reg_unknown");
-        let ctx = HarnessContext::new(home.clone(), Vec::new(), Vec::new());
         let err = registry
             .prepare("nope", &ActionInput::FixApplyAll)
             .unwrap_err();

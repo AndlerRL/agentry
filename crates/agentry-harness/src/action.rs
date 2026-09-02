@@ -20,24 +20,20 @@ pub enum Confirmation {
     Unsupported,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum HarnessError {
+    #[error("invalid input: {0}")]
     InvalidInput(String),
+    #[error("execution failed: {0}")]
     ExecutionFailed(String),
+    #[error("gate ticket '{ticket_id}' does not authorize action '{action_id}'")]
+    TicketMismatch {
+        ticket_id: String,
+        action_id: String,
+    },
+    #[error("unsupported: {0}")]
     Unsupported(String),
 }
-
-impl std::fmt::Display for HarnessError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            HarnessError::InvalidInput(msg) => write!(f, "invalid input: {msg}"),
-            HarnessError::ExecutionFailed(msg) => write!(f, "execution failed: {msg}"),
-            HarnessError::Unsupported(msg) => write!(f, "unsupported: {msg}"),
-        }
-    }
-}
-
-impl std::error::Error for HarnessError {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
