@@ -13,6 +13,13 @@ pub fn plan_sync(
 ) -> SyncPlan {
     let mut mappings = Vec::new();
 
+    if prompt.frontmatter.contains_key("agentry-role") {
+        return SyncPlan {
+            prompt_id: prompt.id.clone(),
+            mappings,
+        };
+    }
+
     for agent in agents {
         if !agent.installed {
             continue;
@@ -120,6 +127,10 @@ pub fn project_sync_plans(
 ) -> Vec<SyncMapping> {
     let mut mappings = Vec::new();
 
+    if prompt.frontmatter.contains_key("agentry-role") {
+        return mappings;
+    }
+
     if !matches!(prompt.scope, PromptScope::Global) {
         return mappings;
     }
@@ -221,5 +232,36 @@ mod tests {
             PathBuf::from("/home/user/.claude/CLAUDE.md")
         );
         assert_eq!(plan.mappings[0].target_format, PromptFormat::PlainMd);
+    }
+
+    #[test]
+    fn test_plan_sync_excludes_role_marked_prompts() {
+        let mut prompt = make_prompt("auditor", PromptFormat::PlainMd);
+        prompt.frontmatter.insert(
+            "agentry-role".to_string(),
+            serde_yaml::Value::String("auditor".to_string()),
+        );
+        let home = PathBuf::from("/home/user");
+        let agents = vec![make_agent("claude-code", "Claude Code", true)];
+        let plan = plan_sync(&prompt, &agents, &home);
+        assert!(plan.mappings.is_empty());
+    }
+
+    #[test]
+    fn test_project_sync_plans_excludes_role_marked_prompts() {
+        let mut prompt = make_prompt("auditor", PromptFormat::PlainMd);
+        prompt.frontmatter.insert(
+            "agentry-role".to_string(),
+            serde_yaml::Value::String("auditor".to_string()),
+        );
+        let project = PathBuf::from("/tmp/proj");
+        std::fs::create_dir_all(project.join(".git")).unwrap();
+        let mappings = project_sync_plans(
+            &prompt,
+            std::slice::from_ref(&project),
+            &PathBuf::from("/home"),
+        );
+        assert!(mappings.is_empty());
+        std::fs::remove_dir_all(&project).unwrap();
     }
 }

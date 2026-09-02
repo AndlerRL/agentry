@@ -28,6 +28,7 @@ pub enum FindingCategory {
     OrphanedFiles,
     OpenClaw,
     Acp,
+    Audited,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,6 +41,8 @@ pub struct AuditFinding {
     pub remediation: String,
     pub auto_fixable: bool,
     pub fix: Option<FixAction>,
+    #[serde(default)]
+    pub suggested_fix: Option<FixAction>,
     pub evidence: Option<String>,
 }
 
@@ -107,5 +110,5 @@ pub struct AuditReport {
 }
 
 fn default_schema_version() -> u32 {
-    1
+    2
 }

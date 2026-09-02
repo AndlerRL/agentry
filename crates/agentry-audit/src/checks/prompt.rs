@@ -49,6 +49,7 @@ fn missing(ctx: &CheckContext, agent: &DetectedAgent) -> Vec<AuditFinding> {
             prompt_id,
             agent_id: agent.spec.id.clone(),
         }),
+        suggested_fix: None,
         evidence: Some(format!("{} does not exist", path.display())),
     }]
 }
@@ -89,6 +90,7 @@ fn empty(ctx: &CheckContext, agent: &DetectedAgent) -> Vec<AuditFinding> {
             prompt_id,
             agent_id: agent.spec.id.clone(),
         }),
+        suggested_fix: None,
         evidence: Some(format!(
             "bytes={} whitespace_only=true path={}",
             content.len(),
@@ -130,6 +132,7 @@ fn oversized(ctx: &CheckContext, agent: &DetectedAgent) -> Vec<AuditFinding> {
         remediation: format!("Trim '{}' to fit within {} bytes", path.display(), max_size),
         auto_fixable: false,
         fix: None,
+        suggested_fix: None,
         evidence: Some(format!(
             "size={} max_size={} path={}",
             size,
@@ -185,6 +188,7 @@ fn frontmatter_invalid(ctx: &CheckContext, agent: &DetectedAgent) -> Vec<AuditFi
         ),
         auto_fixable: false,
         fix: None,
+        suggested_fix: None,
         evidence: Some(format!("path={} reason={}", path.display(), problem)),
     }]
 }
@@ -240,6 +244,7 @@ fn format_mismatch(ctx: &CheckContext, agent: &DetectedAgent) -> Vec<AuditFindin
             prompt_id,
             agent_id: agent.spec.id.clone(),
         }),
+        suggested_fix: None,
         evidence: Some(format!("declared={} detected={}", declared, detected)),
     }]
 }

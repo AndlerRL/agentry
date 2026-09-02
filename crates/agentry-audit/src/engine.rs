@@ -138,7 +138,7 @@ pub fn run_audit(ctx: &CheckContext) -> AuditReport {
         agents,
         global_findings,
         summary,
-        schema_version: 1,
+        schema_version: 2,
     }
 }
 
@@ -162,7 +162,7 @@ fn agent_audit(findings: &[AuditFinding], detected: &DetectedAgent) -> AgentAudi
     }
 }
 
-pub(crate) fn build_summary<'a>(
+pub fn build_summary<'a>(
     findings: impl IntoIterator<Item = &'a AuditFinding>,
     agents: &[AgentAudit],
 ) -> AuditSummary {
@@ -292,6 +292,7 @@ mod tests {
             remediation: "fix it".to_string(),
             auto_fixable: false,
             fix: None,
+            suggested_fix: None,
             evidence: None,
         }
     }
@@ -411,7 +412,7 @@ mod tests {
         assert_eq!(report.summary.total_findings, 0);
         assert_eq!(report.summary.auto_fixable_count, 0);
         assert_eq!(report.summary.healthy_agents, 0);
-        assert_eq!(report.schema_version, 1);
+        assert_eq!(report.schema_version, 2);
     }
 
     #[test]

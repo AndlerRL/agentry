@@ -52,6 +52,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "agentry-auditor"
+version = "0.2.0"
+dependencies = [
+ "agentry-agents",
+ "agentry-audit",
+ "agentry-core",
+ "agentry-harness",
+ "agentry-skills",
+ "chrono",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml",
+]
+
+[[package]]
 name = "agentry-core"
 version = "0.2.0"
 dependencies = [
@@ -72,6 +88,7 @@ dependencies = [
  "agentry-core",
  "agentry-sync",
  "chrono",
+ "crossterm",
  "serde",
  "serde_json",
  "sha1",
@@ -119,6 +136,7 @@ dependencies = [
  "anyhow",
  "serde",
  "serde_json",
+ "serde_yaml",
  "thiserror",
  "tokio",
 ]
@@ -129,6 +147,7 @@ version = "0.2.0"
 dependencies = [
  "agentry-agents",
  "agentry-audit",
+ "agentry-auditor",
  "agentry-core",
  "agentry-harness",
  "agentry-openclaw",

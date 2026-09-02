@@ -106,7 +106,7 @@ mod tests {
             .unwrap();
         match output {
             ActionOutput::AuditCompleted(report) => {
-                assert_eq!(report.schema_version, 1);
+                assert_eq!(report.schema_version, 2);
             }
             other => panic!("unexpected output: {other:?}"),
         }

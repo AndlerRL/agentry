@@ -19,6 +19,7 @@ agentry-skills = { workspace = true }
 agentry-openclaw = { workspace = true }
 agentry-audit = { workspace = true }
 agentry-harness = { workspace = true }
+agentry-auditor = { workspace = true }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
 clap = { workspace = true }

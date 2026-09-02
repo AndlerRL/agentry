@@ -73,6 +73,7 @@ fn drift_finding(mapping: &SyncMapping) -> Option<AuditFinding> {
             prompt_id: mapping.prompt_id.clone(),
             agent_id: mapping.agent_id.clone(),
         }),
+        suggested_fix: None,
         evidence: Some(format!(
             "status={} destination={}",
             mapping.status,
@@ -105,6 +106,7 @@ fn missing_finding(mapping: &SyncMapping) -> Option<AuditFinding> {
             prompt_id: mapping.prompt_id.clone(),
             agent_id: mapping.agent_id.clone(),
         }),
+        suggested_fix: None,
         evidence: Some(format!(
             "status=Missing destination={}",
             mapping.destination.display()

@@ -39,6 +39,7 @@ fn capability_finding(agent: &agentry_core::models::DetectedAgent) -> AuditFindi
         ),
         auto_fixable: false,
         fix: None,
+        suggested_fix: None,
         evidence: Some(format!(
             "agent_id={} installed={} explicit_capability_arm=false fallback_capability=general",
             agent.spec.id, agent.installed

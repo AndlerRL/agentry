@@ -94,6 +94,7 @@ fn finding(prompt: &UnifiedPrompt, snapshots: &[AgentSnapshot]) -> AuditFinding 
         ),
         auto_fixable: false,
         fix: None,
+        suggested_fix: None,
         evidence: Some(format!(
             "agents={} diff={}",
             agent_list(snapshots, ","),

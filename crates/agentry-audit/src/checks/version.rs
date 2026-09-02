@@ -53,6 +53,7 @@ fn unparseable(agent: &agentry_core::models::DetectedAgent) -> Vec<AuditFinding>
             .to_string(),
         auto_fixable: false,
         fix: None,
+        suggested_fix: None,
         evidence: Some(version.to_string()),
     }]
 }
@@ -105,6 +106,7 @@ fn outdated(ctx: &CheckContext, agent: &agentry_core::models::DetectedAgent) -> 
         ),
         auto_fixable: true,
         fix: Some(fix),
+        suggested_fix: None,
         evidence: Some(format!(
             "installed={} latest={} method={}",
             installed_raw,
@@ -140,6 +142,7 @@ fn latest_unknown(
         remediation: "Check the vendor's release channel manually for newer versions".to_string(),
         auto_fixable: false,
         fix: None,
+        suggested_fix: None,
         evidence: Some(method.method_key().to_string()),
     }]
 }

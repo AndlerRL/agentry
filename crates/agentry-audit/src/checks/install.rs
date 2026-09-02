@@ -55,6 +55,7 @@ fn binary_missing(
         ),
         auto_fixable: fix.is_some(),
         fix,
+        suggested_fix: None,
         evidence: Some(format!(
             "config_dir_exists={} prompt_file_exists={} binary_on_path={}",
             agent.config_dir_exists,
@@ -93,6 +94,7 @@ fn config_dir_missing(
         ),
         auto_fixable: false,
         fix: None,
+        suggested_fix: None,
         evidence: Some(agent.spec.config_dir.clone()),
     }]
 }
@@ -126,6 +128,7 @@ fn method_conflict(agent: &agentry_core::models::DetectedAgent) -> Vec<AuditFind
         ),
         auto_fixable: false,
         fix: None,
+        suggested_fix: None,
         evidence: Some(
             agent
                 .detected_methods

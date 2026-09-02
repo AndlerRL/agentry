@@ -18,9 +18,9 @@ pub struct FixOutcome {
     pub message: String,
 }
 
-fn is_safe_shell_arg(arg: &str) -> bool {
+pub fn is_safe_shell_arg(arg: &str) -> bool {
     arg.chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/' | '@' | '='))
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/' | '@' | '=' | ':'))
 }
 
 pub fn is_safe_shell_command(command: &str) -> bool {
@@ -61,8 +61,26 @@ pub fn validate(fix: &FixAction, home_dir: &Path) -> Result<(), String> {
                 Err(format!("refused unsafe shell command: {command}"))
             }
         }
-        FixAction::FileWrite { .. } => Ok(()),
-        FixAction::FileRemove { .. } => Ok(()),
+        FixAction::FileWrite { path, .. } => {
+            if !path.starts_with(home_dir) {
+                return Err(format!(
+                    "refused file write outside {}: {}",
+                    home_dir.display(),
+                    path.display()
+                ));
+            }
+            Ok(())
+        }
+        FixAction::FileRemove { path } => {
+            if !path.starts_with(home_dir) {
+                return Err(format!(
+                    "refused file remove outside {}: {}",
+                    home_dir.display(),
+                    path.display()
+                ));
+            }
+            Ok(())
+        }
         FixAction::SymlinkRecreate { path, target } => {
             if !path.starts_with(home_dir) {
                 return Err(format!(
@@ -82,6 +100,40 @@ pub fn validate(fix: &FixAction, home_dir: &Path) -> Result<(), String> {
             Ok(())
         }
         FixAction::SyncPrompt { .. } => Ok(()),
+    }
+}
+
+pub fn default_allowlist(home_dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut allowlist = vec![home_dir.join(".agents")];
+    for spec in all_agent_specs() {
+        allowlist.push(home_dir.join(&spec.config_dir));
+    }
+    allowlist
+}
+
+pub fn validate_with_allowlist(
+    fix: &FixAction,
+    home_dir: &Path,
+    allowlist: &[std::path::PathBuf],
+) -> Result<(), String> {
+    match fix {
+        FixAction::FileWrite { path, .. } | FixAction::FileRemove { path } => {
+            if !path.starts_with(home_dir) {
+                return Err(format!(
+                    "refused file path outside {}: {}",
+                    home_dir.display(),
+                    path.display()
+                ));
+            }
+            if !allowlist.iter().any(|allowed| path.starts_with(allowed)) {
+                return Err(format!(
+                    "refused file path outside allowlist: {}",
+                    path.display()
+                ));
+            }
+            Ok(())
+        }
+        _ => validate(fix, home_dir),
     }
 }
 
@@ -392,6 +444,7 @@ mod tests {
             remediation: "run the fix".to_string(),
             auto_fixable,
             fix,
+            suggested_fix: None,
             evidence: None,
         }
     }
@@ -410,7 +463,7 @@ mod tests {
                 healthy_agents: 0,
                 degraded_agents: 0,
             },
-            schema_version: 1,
+            schema_version: 2,
         }
     }
 
@@ -1055,16 +1108,102 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_accepts_file_write_and_remove_pending_path_bounds() {
+    fn test_validate_accepts_file_write_and_remove_inside_home() {
         let write = FixAction::FileWrite {
-            path: PathBuf::from("/anywhere/file.md"),
+            path: PathBuf::from("/home/user/.agents/file.md"),
             content: "body".to_string(),
         };
         let remove = FixAction::FileRemove {
-            path: PathBuf::from("/anywhere/file.md"),
+            path: PathBuf::from("/home/user/.agents/file.md"),
         };
         assert!(validate(&write, Path::new("/home/user")).is_ok());
         assert!(validate(&remove, Path::new("/home/user")).is_ok());
+    }
+
+    #[test]
+    fn test_validate_refuses_file_write_outside_home() {
+        let fix = FixAction::FileWrite {
+            path: PathBuf::from("/elsewhere/file.md"),
+            content: "body".to_string(),
+        };
+        let err = validate(&fix, Path::new("/home/user")).unwrap_err();
+        assert!(err.contains("refused file write outside"));
+    }
+
+    #[test]
+    fn test_validate_refuses_file_remove_outside_home() {
+        let fix = FixAction::FileRemove {
+            path: PathBuf::from("/elsewhere/file.md"),
+        };
+        let err = validate(&fix, Path::new("/home/user")).unwrap_err();
+        assert!(err.contains("refused file remove outside"));
+    }
+
+    #[test]
+    fn test_validate_with_allowlist_accepts_agents_dir() {
+        let home = PathBuf::from("/home/user");
+        let allowlist = default_allowlist(&home);
+        let write = FixAction::FileWrite {
+            path: home.join(".agents").join("prompts").join("X.md"),
+            content: "body".to_string(),
+        };
+        assert!(validate_with_allowlist(&write, &home, &allowlist).is_ok());
+    }
+
+    #[test]
+    fn test_validate_with_allowlist_accepts_agent_config_dir() {
+        let home = PathBuf::from("/home/user");
+        let allowlist = default_allowlist(&home);
+        let write = FixAction::FileWrite {
+            path: home.join(".claude").join("CLAUDE.md"),
+            content: "body".to_string(),
+        };
+        assert!(validate_with_allowlist(&write, &home, &allowlist).is_ok());
+    }
+
+    #[test]
+    fn test_validate_with_allowlist_refuses_outside_allowlist() {
+        let home = PathBuf::from("/home/user");
+        let allowlist = default_allowlist(&home);
+        let write = FixAction::FileWrite {
+            path: home.join("Documents").join("notes.md"),
+            content: "body".to_string(),
+        };
+        let err = validate_with_allowlist(&write, &home, &allowlist).unwrap_err();
+        assert!(err.contains("refused file path outside allowlist"));
+    }
+
+    #[test]
+    fn test_validate_with_allowlist_refuses_outside_home() {
+        let home = PathBuf::from("/home/user");
+        let allowlist = default_allowlist(&home);
+        let remove = FixAction::FileRemove {
+            path: PathBuf::from("/etc/passwd"),
+        };
+        let err = validate_with_allowlist(&remove, &home, &allowlist).unwrap_err();
+        assert!(err.contains("refused file path outside"));
+    }
+
+    #[test]
+    fn test_validate_with_allowlist_delegates_shell_and_symlink() {
+        let home = PathBuf::from("/home/user");
+        let allowlist = default_allowlist(&home);
+        let shell = FixAction::ShellCommand {
+            description: "noop".to_string(),
+            command: "true".to_string(),
+        };
+        assert!(validate_with_allowlist(&shell, &home, &allowlist).is_ok());
+        let symlink = FixAction::SymlinkRecreate {
+            path: home.join(".agents").join("skills").join("x"),
+            target: "../../.agents/skills/x/SKILL.md".to_string(),
+        };
+        assert!(validate_with_allowlist(&symlink, &home, &allowlist).is_ok());
+    }
+
+    #[test]
+    fn test_is_safe_shell_arg_accepts_colon_for_model_tags() {
+        assert!(is_safe_shell_arg("qwen2.5-coder:7b"));
+        assert!(is_safe_shell_command("ollama run qwen2.5-coder:7b"));
     }
 
     #[test]

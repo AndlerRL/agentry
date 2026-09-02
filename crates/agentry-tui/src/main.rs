@@ -64,6 +64,23 @@ enum Commands {
         #[arg(long, requires = "fix")]
         yes: bool,
     },
+    /// Set up or run the agent auditor
+    Auditor {
+        #[command(subcommand)]
+        action: AuditorCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum AuditorCommands {
+    /// Write [auditor] config, canonical prompt if absent, adopt orphaned skills
+    Setup,
+    /// Run the audit, review findings with the host LLM, and print the merged report
+    Review {
+        /// Output the merged AuditReport as JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -136,6 +153,7 @@ async fn main() -> Result<()> {
             fix,
             yes,
         }) => cmd_audit(agent, json, severity, fix, yes).await,
+        Some(Commands::Auditor { action }) => cmd_auditor(action).await,
         None => run_tui().await,
     }
 }
@@ -253,7 +271,8 @@ async fn cmd_sync(prompt_name: Option<String>, all: bool, dry_run: bool) -> Resu
         return Ok(());
     }
 
-    let registry = agentry_harness::HarnessRegistry::with_default_actions();
+    let mut registry = agentry_harness::HarnessRegistry::with_default_actions();
+    registry.register(Box::new(agentry_auditor::action::AuditorReviewAction));
     for prompt in &prompts_to_sync {
         println!("Syncing: {}", prompt.name);
         let ctx =
@@ -698,7 +717,8 @@ async fn cmd_audit(
         }
         let before_count = report.summary.total_findings;
         let outcomes = if yes {
-            let registry = agentry_harness::HarnessRegistry::with_default_actions();
+            let mut registry = agentry_harness::HarnessRegistry::with_default_actions();
+            registry.register(Box::new(agentry_auditor::action::AuditorReviewAction));
             let ctx = agentry_harness::HarnessContext::new(
                 home.clone(),
                 agentry_agents::detect_all_agents().await,
@@ -821,6 +841,76 @@ async fn cmd_audit(
     }
 
     Ok(())
+}
+
+async fn cmd_auditor(action: AuditorCommands) -> Result<()> {
+    let home = resolve_home();
+    match action {
+        AuditorCommands::Setup => {
+            let config = agentry_auditor::config::load_config(&home);
+            let mut written = false;
+            if config.host_cli.is_none() {
+                agentry_auditor::config::write_config(&home, &config)
+                    .map_err(|err| anyhow::anyhow!(err))?;
+                written = true;
+            }
+            let prompt_written = agentry_auditor::config::write_canonical_prompt_if_absent(&home)
+                .map_err(|err| anyhow::anyhow!(err))?;
+            let adopted = agentry_auditor::config::adopt_orphaned_collection(&home)
+                .map_err(|err| anyhow::anyhow!(err))?;
+            println!("auditor setup complete");
+            if written {
+                println!("  wrote [auditor] defaults to ~/.agents/agentry.toml");
+            }
+            if prompt_written {
+                println!("  wrote canonical prompt to ~/.agents/prompts/agentry-auditor.md");
+            }
+            if adopted {
+                println!("  adopted context-engineering-collection into the skill lockfile");
+            }
+            Ok(())
+        }
+        AuditorCommands::Review { json } => {
+            let project_dirs = vec![home.join(agentry_core::models::DEFAULT_PROJECT_DIR)];
+            let report = run_audit_with_detection(&home, project_dirs.clone()).await;
+            let agents = agentry_agents::detect_all_agents().await;
+            let prompts = agentry_core::discovery::discover_prompts(&home, &project_dirs);
+            let ctx = agentry_harness::HarnessContext::new(home.clone(), agents, prompts)
+                .with_report(Some(report));
+            let mut registry = agentry_harness::HarnessRegistry::with_default_actions();
+            registry.register(Box::new(agentry_auditor::action::AuditorReviewAction));
+            let output = registry
+                .invoke_confirmed(
+                    &ctx,
+                    "auditor.review",
+                    agentry_harness::ActionInput::AuditorReview {
+                        focus_check_id: None,
+                    },
+                )
+                .await
+                .map_err(|err| anyhow::anyhow!(err))?;
+            match output {
+                agentry_harness::ActionOutput::AuditorMerged { added, report } => {
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&report)?);
+                    } else {
+                        println!("Auditor review complete: {added} findings added");
+                        let all: Vec<agentry_audit::report::AuditFinding> = report
+                            .agents
+                            .iter()
+                            .flat_map(|agent| agent.findings.iter().cloned())
+                            .chain(report.global_findings.iter().cloned())
+                            .collect();
+                        audit_print_findings(&all, None);
+                    }
+                }
+                other => {
+                    anyhow::bail!("auditor.review returned unexpected output: {other:?}")
+                }
+            }
+            Ok(())
+        }
+    }
 }
 
 #[cfg(test)]

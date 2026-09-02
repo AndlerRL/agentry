@@ -108,6 +108,7 @@ fn broken_link_finding(
         remediation,
         auto_fixable,
         fix,
+        suggested_fix: None,
         evidence: Some(format!("symlink={} resolves=false", link.display())),
     }
 }
@@ -142,6 +143,7 @@ fn orphan_finding(skill: &AvailableSkill) -> Option<AuditFinding> {
         ),
         auto_fixable: false,
         fix: None,
+        suggested_fix: None,
         evidence: Some(format!(
             "install_path={} lockfile_entry=false note=only_directories_containing_SKILL.md_are_detected",
             path.display()
@@ -199,6 +201,7 @@ fn hash_finding(name: &str, entry: &SkillLockEntry, skills_root: &Path) -> Optio
             description: format!("Update skill '{}' to restore the locked hash", name),
             command,
         }),
+        suggested_fix: None,
         evidence: Some(format!(
             "skill={} expected={} actual={} path={}{}",
             name,

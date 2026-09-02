@@ -125,6 +125,7 @@ mod tests {
             remediation: "run the fix".to_string(),
             auto_fixable: true,
             fix: Some(fix),
+            suggested_fix: None,
             evidence: None,
         }
     }
@@ -145,7 +146,7 @@ mod tests {
                 healthy_agents: 0,
                 degraded_agents: 0,
             },
-            schema_version: 1,
+            schema_version: 2,
         }
     }
 

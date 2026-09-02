@@ -50,6 +50,9 @@ pub enum ActionInput {
         check_id: String,
     },
     FixApplyAll,
+    AuditorReview {
+        focus_check_id: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +62,7 @@ pub enum ActionOutput {
     AuditCompleted(AuditReport),
     FixApplied(FixOutcome),
     FixAppliedAll { outcomes: Vec<FixOutcome> },
+    AuditorMerged { added: usize, report: AuditReport },
 }
 
 pub trait HarnessAction: Send + Sync {

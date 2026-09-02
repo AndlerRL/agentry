@@ -48,6 +48,7 @@ fn lobster_finding(
         ),
         auto_fixable: false,
         fix: None,
+        suggested_fix: None,
         evidence: Some(format!(
             "workflow={} path={} problem={}",
             workflow.name,
@@ -79,6 +80,7 @@ fn workspace_incomplete(workspace: &OpenClawWorkspace) -> Vec<AuditFinding> {
         ),
         auto_fixable: false,
         fix: None,
+        suggested_fix: None,
         evidence: Some(format!(
             "workspace={} path={} has_agents_md={} has_soul_md={}",
             workspace.id,

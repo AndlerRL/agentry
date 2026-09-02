@@ -2,6 +2,7 @@ pub mod action;
 pub mod actions;
 pub mod context;
 pub mod gate;
+pub mod hosts;
 pub mod registry;
 
 pub use action::{

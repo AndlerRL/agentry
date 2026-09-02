@@ -293,6 +293,9 @@ pub fn apply_feedback(report: &mut AuditReport, history: &[HistoryEntry]) {
             .iter_mut()
             .flat_map(|agent| agent.findings.iter_mut()),
     ) {
+        if finding.category == FindingCategory::Audited {
+            continue;
+        }
         finding.severity =
             promote_severity(finding.severity, recurring.contains(&finding.check_id));
         finding.severity = demote_severity(finding.severity, dormant.contains(&finding.check_id));
@@ -327,6 +330,7 @@ fn new_check_candidate_finding(candidates: &[String]) -> AuditFinding {
                 .to_string(),
         auto_fixable: false,
         fix: None,
+        suggested_fix: None,
         evidence: Some(candidates.join(", ")),
     }
 }
@@ -391,6 +395,7 @@ mod tests {
             remediation: "fix it".to_string(),
             auto_fixable: false,
             fix: None,
+            suggested_fix: None,
             evidence: None,
         }
     }
@@ -458,7 +463,7 @@ mod tests {
                 healthy_agents: 1,
                 degraded_agents: 0,
             },
-            schema_version: 1,
+            schema_version: 2,
         }
     }
 
@@ -700,6 +705,37 @@ mod tests {
             new_check_candidates(&history),
             vec!["skills.orphaned".to_string(), "sync.drift".to_string()]
         );
+    }
+
+    #[test]
+    fn apply_feedback_skips_audited_category() {
+        let mut history = Vec::new();
+        for run in 0..12 {
+            history.push(entry("auditor.suggestion", run, Some("codex")));
+        }
+        let mut audited = finding("auditor.suggestion", Severity::Suggestion);
+        audited.category = FindingCategory::Audited;
+        audited.agent_id = Some("codex".to_string());
+        let mut report = fixture_report(vec![audited], vec![]);
+        apply_feedback(&mut report, &history);
+        assert_eq!(
+            report.agents[0].findings[0].severity,
+            Severity::Suggestion,
+            "Audited findings must never be promoted by recurrence"
+        );
+    }
+
+    #[test]
+    fn append_history_records_audited_findings() {
+        let tmp = TempDir::new("agentry_history_audited");
+        let mut audited = finding("auditor.suggestion", Severity::Suggestion);
+        audited.category = FindingCategory::Audited;
+        let report = fixture_report(vec![], vec![audited]);
+        append_history(tmp.path(), &report, &[]).unwrap();
+        let history = load_history(tmp.path()).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].category, FindingCategory::Audited);
+        assert_eq!(history[0].check_id, "auditor.suggestion");
     }
 
     #[test]

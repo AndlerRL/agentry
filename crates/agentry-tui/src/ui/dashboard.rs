@@ -1420,7 +1420,15 @@ fn draw_audit_list(f: &mut Frame, app: &App, area: Rect) {
         ))));
         for finding in findings {
             let agent = finding.agent_id.as_deref().unwrap_or("-");
-            let row = format!("   [{}] {} — {}", agent, finding.check_id, finding.message);
+            let badge = if finding.category == agentry_audit::report::FindingCategory::Audited {
+                "[AI] "
+            } else {
+                ""
+            };
+            let row = format!(
+                "   [{}] {}{} — {}",
+                agent, badge, finding.check_id, finding.message
+            );
             items.push(ListItem::new(Line::from(Span::styled(
                 truncate_to_width(&row, list_width),
                 Style::default().fg(Color::White),
@@ -1441,9 +1449,14 @@ fn draw_audit_detail(f: &mut Frame, app: &App, area: Rect) {
     let detail_width = area.width.saturating_sub(4);
 
     let lines = if let Some(finding) = app.selected_finding() {
+        let badge = if finding.category == agentry_audit::report::FindingCategory::Audited {
+            " [AI]"
+        } else {
+            ""
+        };
         let mut detail_lines = vec![
             Line::from(Span::styled(
-                format!(" {} ", finding.check_id),
+                format!(" {} {}{}", finding.check_id, badge, ""),
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),

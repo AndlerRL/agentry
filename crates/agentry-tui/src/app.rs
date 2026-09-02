@@ -207,7 +207,11 @@ impl App {
             version_list_error: None,
             audit_report: None,
             audit_filter: None,
-            harness: agentry_harness::HarnessRegistry::with_default_actions(),
+            harness: {
+                let mut registry = agentry_harness::HarnessRegistry::with_default_actions();
+                registry.register(Box::new(agentry_auditor::action::AuditorReviewAction));
+                registry
+            },
             harness_confirm: None,
         }
     }
@@ -1371,6 +1375,24 @@ impl App {
         }
     }
 
+    fn audited_file_write_confirm(&self) -> Option<String> {
+        let finding = self.selected_finding()?;
+        if finding.category != agentry_audit::report::FindingCategory::Audited {
+            return None;
+        }
+        let fix = finding.fix.as_ref().or(finding.suggested_fix.as_ref())?;
+        let agentry_audit::report::FixAction::FileWrite { path, content } = fix else {
+            return None;
+        };
+        let preview: String = content.chars().take(200).collect();
+        Some(format!(
+            "write {} ({} bytes): '{}'? (y/n)",
+            path.display(),
+            content.len(),
+            preview
+        ))
+    }
+
     fn prepare_harness(&mut self, action_id: &str, input: agentry_harness::ActionInput) {
         match self.harness.prepare(action_id, &input) {
             Ok(pending) => match pending.confirmation {
@@ -1381,7 +1403,13 @@ impl App {
                     });
                 }
                 agentry_harness::Confirmation::Single | agentry_harness::Confirmation::PerItem => {
-                    self.status_message = Some(format!("{}? (y/n)", pending.describe));
+                    let message = if action_id == "fix.apply" {
+                        self.audited_file_write_confirm()
+                            .unwrap_or_else(|| format!("{}? (y/n)", pending.describe))
+                    } else {
+                        format!("{}? (y/n)", pending.describe)
+                    };
+                    self.status_message = Some(message);
                     self.harness_confirm = Some(HarnessPendingInvocation {
                         action_id: pending.action_id.to_string(),
                         input,
@@ -1449,6 +1477,13 @@ impl App {
             }
             ("fix.apply_all", agentry_harness::ActionOutput::FixAppliedAll { outcomes }) => {
                 self.post_fix_feedback(outcomes);
+            }
+            ("auditor.review", agentry_harness::ActionOutput::AuditorMerged { added, report }) => {
+                self.audit_report = Some(report);
+                self.audit_loaded = true;
+                self.list_selected = 0;
+                self.status_message =
+                    Some(format!("Auditor review complete: {added} findings added"));
             }
             _ => {
                 self.status_message = Some(format!("{action_id} completed"));
@@ -1930,6 +1965,7 @@ mod tests {
             remediation: "fix it".to_string(),
             auto_fixable: false,
             fix: None,
+            suggested_fix: None,
             evidence: None,
         }
     }
@@ -2584,6 +2620,7 @@ mod tests {
             remediation: "run the fix".to_string(),
             auto_fixable: true,
             fix: Some(agentry_audit::report::FixAction::FileRemove { path }),
+            suggested_fix: None,
             evidence: None,
         }
     }
@@ -2598,15 +2635,14 @@ mod tests {
 
     #[test]
     fn fix_key_a_prepares_confirm_and_applies_through_harness() {
-        let target = std::env::temp_dir()
-            .join(format!("agentry-fix-key-a-{}", std::process::id()))
-            .join("stale.md");
+        let (mut app, tmp) = fix_app("fix-a", vec![]);
+        let target = tmp.join("stale.md");
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
         std::fs::write(&target, "x").unwrap();
-        let (mut app, tmp) = fix_app(
-            "fix-a",
-            vec![fixable_finding("orphan_cleanup", target.clone())],
-        );
+        app.audit_report = Some(report_with(vec![fixable_finding(
+            "orphan_cleanup",
+            target.clone(),
+        )]));
         app.list_selected = 1;
 
         press(&mut app, KeyCode::Char('a'));
@@ -2633,15 +2669,14 @@ mod tests {
 
     #[test]
     fn fix_key_a_cancelled_with_n() {
-        let target = std::env::temp_dir()
-            .join(format!("agentry-fix-key-n-{}", std::process::id()))
-            .join("stale.md");
+        let (mut app, tmp) = fix_app("fix-n", vec![]);
+        let target = tmp.join("stale.md");
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
         std::fs::write(&target, "x").unwrap();
-        let (mut app, tmp) = fix_app(
-            "fix-n",
-            vec![fixable_finding("orphan_cleanup", target.clone())],
-        );
+        app.audit_report = Some(report_with(vec![fixable_finding(
+            "orphan_cleanup",
+            target.clone(),
+        )]));
         app.list_selected = 1;
 
         press(&mut app, KeyCode::Char('a'));
@@ -2672,19 +2707,16 @@ mod tests {
 
     #[test]
     fn fix_key_a_applies_all_through_harness() {
-        let dir = std::env::temp_dir().join(format!("agentry-fix-key-all-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let first = dir.join("first.md");
-        let second = dir.join("second.md");
+        let (mut app, tmp) = fix_app("fix-all", vec![]);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let first = tmp.join("first.md");
+        let second = tmp.join("second.md");
         std::fs::write(&first, "1").unwrap();
         std::fs::write(&second, "2").unwrap();
-        let (mut app, tmp) = fix_app(
-            "fix-all",
-            vec![
-                fixable_finding("cleanup_one", first.clone()),
-                fixable_finding("cleanup_two", second.clone()),
-            ],
-        );
+        app.audit_report = Some(report_with(vec![
+            fixable_finding("cleanup_one", first.clone()),
+            fixable_finding("cleanup_two", second.clone()),
+        ]));
 
         press(&mut app, KeyCode::Char('A'));
         assert!(app.harness_confirm.is_some());
@@ -2706,15 +2738,14 @@ mod tests {
 
     #[test]
     fn fix_apply_reruns_audit_and_finding_disappears() {
-        let target = std::env::temp_dir()
-            .join(format!("agentry-fix-reaudit-{}", std::process::id()))
-            .join("stale.md");
+        let (mut app, tmp) = fix_app("fix-reaudit", vec![]);
+        let target = tmp.join("stale.md");
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
         std::fs::write(&target, "x").unwrap();
-        let (mut app, tmp) = fix_app(
-            "fix-reaudit",
-            vec![fixable_finding("orphan_cleanup", target.clone())],
-        );
+        app.audit_report = Some(report_with(vec![fixable_finding(
+            "orphan_cleanup",
+            target.clone(),
+        )]));
         app.list_selected = 1;
 
         press(&mut app, KeyCode::Char('a'));
@@ -2734,6 +2765,69 @@ mod tests {
         assert!(!still_present, "re-audit must reflect the applied fix");
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn auditor_key_l_prepares_confirm_and_merges_no_host_finding() {
+        let tmp = std::env::temp_dir().join(format!("agentry-auditor-l-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let config_path = tmp.join(".agents").join("agentry.toml");
+        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+        let mut toml = String::from("[hosts]\npriority = [\"claude-code\", \"codex\", \"gemini-cli\", \"zai\", \"ollama\"]\n");
+        for id in ["claude-code", "codex", "gemini-cli", "zai", "ollama"] {
+            toml.push_str(&format!(
+                "\n[hosts.{id}]\ndetect_binary = \"definitely-not-installed-xyz\"\n"
+            ));
+        }
+        std::fs::write(&config_path, toml).unwrap();
+        let mut app = audit_app(report_with(Vec::new()));
+        app.home_dir = tmp.clone();
+        app.audit_loaded = true;
+
+        press(&mut app, KeyCode::Char('l'));
+        assert!(app.harness_confirm.is_some());
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|m| m.starts_with("review audit findings with the host LLM")));
+
+        press(&mut app, KeyCode::Char('y'));
+        assert!(app.harness_confirm.is_none());
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|m| m.starts_with("Auditor review complete: 1 findings added")));
+        let report = app.audit_report.as_ref().expect("merged report");
+        assert!(report
+            .global_findings
+            .iter()
+            .any(|f| f.check_id == "auditor.no_host"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn audited_file_write_confirm_shows_size_and_preview() {
+        let mut audited = finding(Severity::Suggestion, "auditor.write");
+        audited.category = FindingCategory::Audited;
+        audited.auto_fixable = false;
+        audited.fix = None;
+        audited.suggested_fix = Some(agentry_audit::report::FixAction::FileWrite {
+            path: std::path::PathBuf::from("/home/user/.agents/prompts/X.md"),
+            content: "body content".to_string(),
+        });
+        let mut app = audit_app(report_with(vec![audited]));
+        app.audit_loaded = true;
+        app.list_selected = 1;
+
+        press(&mut app, KeyCode::Char('a'));
+        assert!(app.harness_confirm.is_some());
+        assert!(app.status_message.as_deref().is_some_and(|m| m.starts_with(
+            "write /home/user/.agents/prompts/X.md (12 bytes): 'body content'? (y/n)"
+        )));
+
+        press(&mut app, KeyCode::Char('n'));
+        assert!(app.harness_confirm.is_none());
     }
 
     #[test]

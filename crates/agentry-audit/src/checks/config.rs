@@ -95,6 +95,7 @@ fn unparseable(agent_id: &str, agent_name: &str, path: &std::path::Path) -> Vec<
         remediation: format!("Fix the syntax error in '{}'", path.display()),
         auto_fixable: false,
         fix: None,
+        suggested_fix: None,
         evidence: Some(error),
     }]
 }
@@ -126,6 +127,7 @@ fn stale(agent_id: &str, agent_name: &str, path: &std::path::Path) -> Vec<AuditF
         remediation: format!("Review '{}' for outdated settings", path.display()),
         auto_fixable: false,
         fix: None,
+        suggested_fix: None,
         evidence: Some(format!(
             "mtime={} age_days={}",
             chrono::DateTime::<chrono::Utc>::from(modified).to_rfc3339(),

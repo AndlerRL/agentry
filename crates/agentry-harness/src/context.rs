@@ -5,14 +5,54 @@ use serde::{Deserialize, Serialize};
 
 use agentry_audit::report::AuditReport;
 
+use crate::hosts::HostsSection;
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct HarnessConfig {
     #[serde(default)]
     pub harness: HarnessSection,
     #[serde(default)]
+    pub hosts: HostsSection,
+    #[serde(default)]
+    pub auditor: AuditorSection,
+    #[serde(default)]
     pub local: LocalSection,
     #[serde(default)]
     pub onboarding: OnboardingSection,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditorSection {
+    #[serde(default)]
+    pub host_cli: Option<String>,
+    #[serde(default)]
+    pub command_template: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default = "default_timeout_secs")]
+    pub timeout_secs: u64,
+    #[serde(default = "default_max_findings")]
+    pub max_findings: usize,
+}
+
+impl Default for AuditorSection {
+    fn default() -> Self {
+        Self {
+            host_cli: None,
+            command_template: None,
+            model: None,
+            timeout_secs: default_timeout_secs(),
+            max_findings: default_max_findings(),
+        }
+    }
+}
+
+fn default_timeout_secs() -> u64 {
+    120
+}
+
+fn default_max_findings() -> usize {
+    20
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -52,6 +92,18 @@ pub fn load_config(home_dir: &std::path::Path) -> HarnessConfig {
         );
         HarnessConfig::default()
     })
+}
+
+pub fn write_config(home_dir: &std::path::Path, config: &HarnessConfig) -> Result<(), String> {
+    let path = config_path(home_dir);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
+    }
+    let content =
+        toml::to_string(config).map_err(|err| format!("failed to serialize config: {err}"))?;
+    std::fs::write(&path, content)
+        .map_err(|err| format!("failed to write {}: {err}", path.display()))
 }
 
 pub struct HarnessContext {
@@ -157,6 +209,19 @@ mod tests {
         let ctx = HarnessContext::new(home.clone(), Vec::new(), Vec::new());
         assert_eq!(ctx.config.harness.enabled_agents, vec!["zai"]);
         assert!(ctx.report.is_none());
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn write_config_roundtrips() {
+        let home = temp_home("agentry_test_ctx_write");
+        let mut config = HarnessConfig::default();
+        config.harness.enabled_agents = vec!["codex".to_string()];
+        config.local.model = Some("qwen2.5-coder:7b".to_string());
+        write_config(&home, &config).unwrap();
+        let loaded = load_config(&home);
+        assert_eq!(loaded.harness.enabled_agents, vec!["codex"]);
+        assert_eq!(loaded.local.model.as_deref(), Some("qwen2.5-coder:7b"));
         std::fs::remove_dir_all(&home).unwrap();
     }
 }

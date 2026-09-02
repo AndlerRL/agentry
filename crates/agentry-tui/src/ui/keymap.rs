@@ -166,9 +166,11 @@ fn audit_bindings() -> Vec<KeyBinding> {
     let when = |app: &App| app.tab_index == 4;
     let fixable = |app: &App| {
         app.tab_index == 4
-            && app
-                .selected_finding()
-                .is_some_and(|f| f.auto_fixable && f.fix.is_some())
+            && app.selected_finding().is_some_and(|f| {
+                (f.auto_fixable && f.fix.is_some())
+                    || (f.category == agentry_audit::report::FindingCategory::Audited
+                        && f.suggested_fix.is_some())
+            })
     };
     let any_fixable = |app: &App| {
         app.tab_index == 4
@@ -177,10 +179,33 @@ fn audit_bindings() -> Vec<KeyBinding> {
                 .as_ref()
                 .is_some_and(|report| !agentry_audit::fix::fixable_findings(report).is_empty())
     };
+    let auditor_ready = |app: &App| app.tab_index == 4 && app.audit_loaded;
     vec![
         scoped(when, "r", "Run audit", TuiAction::RunAudit),
         scoped(when, "f", "Filter", TuiAction::CycleAuditFilter),
         scoped(when, "Enter", "Open finding", TuiAction::Enter),
+        scoped(
+            auditor_ready,
+            "l",
+            "Auditor review",
+            TuiAction::Harness(HarnessInvocation::new(
+                "auditor.review",
+                &agentry_harness::ActionInput::AuditorReview {
+                    focus_check_id: None,
+                },
+            )),
+        ),
+        scoped(
+            auditor_ready,
+            "L",
+            "Auditor review",
+            TuiAction::Harness(HarnessInvocation::new(
+                "auditor.review",
+                &agentry_harness::ActionInput::AuditorReview {
+                    focus_check_id: None,
+                },
+            )),
+        ),
         scoped(
             fixable,
             "a",
@@ -319,7 +344,7 @@ mod tests {
     #[test]
     fn bindings_for_tab_non_empty_for_all_tabs() {
         let app = App::new();
-        let expected_totals = [23, 18, 19, 17, 19];
+        let expected_totals = [23, 18, 19, 17, 21];
         for (tab, expected) in expected_totals.iter().enumerate() {
             let bindings = bindings_for_tab(tab, &app);
             assert!(!bindings.is_empty(), "tab {tab} has no bindings");
@@ -446,6 +471,24 @@ mod tests {
                     ("f", TuiAction::CycleAuditFilter),
                     ("Enter", TuiAction::Enter),
                     (
+                        "l",
+                        TuiAction::Harness(HarnessInvocation::new(
+                            "auditor.review",
+                            &agentry_harness::ActionInput::AuditorReview {
+                                focus_check_id: None,
+                            },
+                        )),
+                    ),
+                    (
+                        "L",
+                        TuiAction::Harness(HarnessInvocation::new(
+                            "auditor.review",
+                            &agentry_harness::ActionInput::AuditorReview {
+                                focus_check_id: None,
+                            },
+                        )),
+                    ),
+                    (
                         "a",
                         TuiAction::Harness(HarnessInvocation::new(
                             "fix.apply",
@@ -525,6 +568,37 @@ mod tests {
         for tab in 0..5 {
             assert_eq!(resolve(tab, &app, "w"), None, "tab {tab}");
         }
+    }
+
+    #[test]
+    fn resolve_auditor_keys_gated_on_audit_loaded() {
+        let app = App::new();
+        for tab in 0..5 {
+            assert_eq!(resolve(tab, &app, "l"), None, "tab {tab}");
+            assert_eq!(resolve(tab, &app, "L"), None, "tab {tab}");
+        }
+        let mut loaded = App::new();
+        loaded.tab_index = 4;
+        loaded.audit_loaded = true;
+        assert!(matches!(
+            resolve(4, &loaded, "l"),
+            Some(TuiAction::Harness(_))
+        ));
+        assert!(matches!(
+            resolve(4, &loaded, "L"),
+            Some(TuiAction::Harness(_))
+        ));
+    }
+
+    #[test]
+    fn resolve_apply_a_widened_to_audited_suggested_fix() {
+        let mut app = App::new();
+        app.tab_index = 4;
+        app.audit_loaded = true;
+        let json = r#"{"generated_at":"2026-01-01T00:00:00Z","machine_id":"m","agents":[],"global_findings":[{"check_id":"auditor.write","severity":"suggestion","category":"audited","agent_id":null,"message":"m","remediation":"r","auto_fixable":false,"fix":null,"suggested_fix":{"kind":"file_write","path":"/home/user/.agents/x.md","content":"body"},"evidence":null}],"summary":{"total_findings":1,"by_severity":{},"by_category":{},"auto_fixable_count":0,"healthy_agents":0,"degraded_agents":0},"schema_version":2}"#;
+        app.audit_report = Some(serde_json::from_str(json).unwrap());
+        app.list_selected = 1;
+        assert!(matches!(resolve(4, &app, "a"), Some(TuiAction::Harness(_))));
     }
 
     #[test]

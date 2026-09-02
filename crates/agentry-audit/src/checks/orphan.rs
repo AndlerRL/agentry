@@ -41,6 +41,7 @@ pub fn run(ctx: &CheckContext) -> Vec<AuditFinding> {
             ),
             auto_fixable: false,
             fix: None,
+            suggested_fix: None,
             evidence: Some(prompt_path.display().to_string()),
         });
     }
