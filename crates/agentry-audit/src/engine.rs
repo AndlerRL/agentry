@@ -131,7 +131,7 @@ pub fn run_audit(ctx: &CheckContext) -> AuditReport {
         })
         .cloned()
         .collect();
-    let summary = build_summary(&attached_findings, &agents);
+    let summary = build_summary(attached_findings.iter(), &agents);
     AuditReport {
         generated_at: chrono::Utc::now(),
         machine_id: machine_id(),
@@ -162,18 +162,27 @@ fn agent_audit(findings: &[AuditFinding], detected: &DetectedAgent) -> AgentAudi
     }
 }
 
-fn build_summary(findings: &[AuditFinding], agents: &[AgentAudit]) -> AuditSummary {
+pub(crate) fn build_summary<'a>(
+    findings: impl IntoIterator<Item = &'a AuditFinding>,
+    agents: &[AgentAudit],
+) -> AuditSummary {
+    let mut total_findings = 0;
+    let mut auto_fixable_count = 0;
     let mut by_severity = BTreeMap::new();
     let mut by_category = BTreeMap::new();
     for finding in findings {
+        total_findings += 1;
+        if finding.auto_fixable {
+            auto_fixable_count += 1;
+        }
         *by_severity.entry(finding.severity).or_insert(0) += 1;
         *by_category.entry(finding.category).or_insert(0) += 1;
     }
     AuditSummary {
-        total_findings: findings.len(),
+        total_findings,
         by_severity,
         by_category,
-        auto_fixable_count: findings.iter().filter(|f| f.auto_fixable).count(),
+        auto_fixable_count,
         healthy_agents: agents
             .iter()
             .filter(|agent| agent.grade == HealthGrade::Healthy)

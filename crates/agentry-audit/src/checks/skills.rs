@@ -6,6 +6,7 @@ use agentry_skills::hub::{AvailableSkill, SkillHub};
 use agentry_skills::lockfile::{compute_skill_hash, read_lockfile, SkillLockEntry};
 
 use crate::engine::CheckContext;
+use crate::fix::is_safe_shell_command;
 use crate::report::{AuditFinding, FindingCategory, FixAction, Severity};
 
 pub fn run(ctx: &CheckContext) -> Vec<AuditFinding> {
@@ -161,6 +162,17 @@ fn hash_mismatch(ctx: &CheckContext) -> Vec<AuditFinding> {
         .collect()
 }
 
+fn skills_update_command(name: &str) -> String {
+    let exe = std::env::current_exe()
+        .ok()
+        .map(|path| path.to_string_lossy().to_string())
+        .filter(|exe| is_safe_shell_command(&format!("{exe} skills update {name}")));
+    match exe {
+        Some(exe) => format!("{exe} skills update {name}"),
+        None => format!("agentry skills update {name}"),
+    }
+}
+
 fn hash_finding(name: &str, entry: &SkillLockEntry, skills_root: &Path) -> Option<AuditFinding> {
     let dir = skills_root.join(name);
     let Ok(actual) = compute_skill_hash(&dir) else {
@@ -174,17 +186,18 @@ fn hash_finding(name: &str, entry: &SkillLockEntry, skills_root: &Path) -> Optio
     } else {
         " note=skill_dir_missing_on_disk_empty_hash_used".to_string()
     };
+    let command = skills_update_command(name);
     Some(AuditFinding {
         check_id: "skills.hash_mismatch".to_string(),
         severity: Severity::Warning,
         category: FindingCategory::Skills,
         agent_id: None,
         message: format!("Skill '{}' folder hash does not match the lockfile", name),
-        remediation: format!("Run 'agentry skills update {}'", name),
+        remediation: format!("Run '{}'", command),
         auto_fixable: true,
         fix: Some(FixAction::ShellCommand {
             description: format!("Update skill '{}' to restore the locked hash", name),
-            command: format!("agentry skills update {}", name),
+            command,
         }),
         evidence: Some(format!(
             "skill={} expected={} actual={} path={}{}",
@@ -492,7 +505,11 @@ mod tests {
         assert!(evidence.contains("skill=my-skill"));
         match &findings[0].fix {
             Some(FixAction::ShellCommand { command, .. }) => {
-                assert_eq!(command, "agentry skills update my-skill");
+                assert!(command.ends_with(" skills update my-skill"));
+                let exe = command
+                    .strip_suffix(" skills update my-skill")
+                    .expect("command should end with 'skills update my-skill'");
+                assert!(exe == "agentry" || std::path::Path::new(exe).is_absolute());
             }
             other => panic!("expected ShellCommand fix, got {:?}", other),
         }

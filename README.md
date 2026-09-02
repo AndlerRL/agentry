@@ -281,13 +281,13 @@ cargo build --release
 cp target/release/agentry /usr/local/bin/
 ```
 
-> **Linux prerequisites**: The build links against OpenSSL via `git2`, which may require the native development packages:
+> **Linux prerequisites**: OpenSSL is vendored and built from source, so no system OpenSSL packages are needed. The vendored OpenSSL build does require `perl` and `make`:
 > ```bash
 > # Debian/Ubuntu
-> sudo apt install libssl-dev pkg-config
+> sudo apt install perl make
 >
 > # Fedora
-> dnf install openssl-devel
+> dnf install perl make
 > ```
 >
 > **Windows is not yet supported.**

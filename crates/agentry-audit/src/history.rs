@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::engine::build_summary;
 use crate::report::{AuditFinding, AuditReport, FindingCategory, Severity};
 
 const RECURRING_CONSECUTIVE_RUNS: usize = 3;
@@ -269,7 +270,9 @@ pub fn new_check_candidates(history: &[HistoryEntry]) -> Vec<String> {
     }
     let mut candidates: Vec<String> = fired_by_check
         .into_iter()
-        .filter(|(_, fired)| fired.len() * 5 >= total_runs * 4)
+        .filter(|(check_id, fired)| {
+            check_id != NEW_CHECK_CANDIDATE_CHECK_ID && fired.len() * 5 >= total_runs * 4
+        })
         .map(|(check_id, _)| check_id)
         .collect();
     candidates.sort();
@@ -300,6 +303,13 @@ pub fn apply_feedback(report: &mut AuditReport, history: &[HistoryEntry]) {
             .global_findings
             .push(new_check_candidate_finding(&candidates));
     }
+    report.summary = build_summary(
+        report
+            .global_findings
+            .iter()
+            .chain(report.agents.iter().flat_map(|agent| agent.findings.iter())),
+        &report.agents,
+    );
 }
 
 fn new_check_candidate_finding(candidates: &[String]) -> AuditFinding {

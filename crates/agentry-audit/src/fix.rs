@@ -22,7 +22,7 @@ fn is_safe_shell_arg(arg: &str) -> bool {
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/' | '@' | '='))
 }
 
-fn is_safe_shell_command(command: &str) -> bool {
+pub fn is_safe_shell_command(command: &str) -> bool {
     if command.trim().is_empty() || command.contains(|c: char| c.is_whitespace() && c != ' ') {
         return false;
     }
