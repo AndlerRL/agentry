@@ -158,7 +158,6 @@ pub fn resolve(tab_index: usize, app: &App, key: &str) -> Option<TuiAction> {
         .map(|b| b.action)
 }
 
-#[allow(dead_code)]
 pub fn bar_lines(tab_index: usize, app: &App, width: usize) -> Vec<Line<'static>> {
     const NAV_KEYS: [&str; 6] = ["j", "k", "Up", "Down", "Tab", "BackTab"];
     let owned: Vec<KeyBinding> = bindings_for_tab(tab_index, app)

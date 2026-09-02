@@ -41,6 +41,7 @@ pub fn draw_dashboard(f: &mut Frame, app: &App) {
         Constraint::Length(3),
         Constraint::Min(10),
         Constraint::Length(1),
+        Constraint::Length(2),
     ])
     .split(size);
 
@@ -98,9 +99,7 @@ pub fn draw_dashboard(f: &mut Frame, app: &App) {
     let status = if let Some(ref err) = app.error_message {
         err.as_str()
     } else {
-        app.status_message
-            .as_deref()
-            .unwrap_or("j/k:navigate  Tab:next-tab  s:sync  q:quit  ?:help")
+        app.status_message.as_deref().unwrap_or("")
     };
     let status_color = if app.error_message.is_some() {
         Color::Red
@@ -112,6 +111,13 @@ pub fn draw_dashboard(f: &mut Frame, app: &App) {
         Style::default().fg(status_color),
     )));
     f.render_widget(status_bar, chunks[2]);
+
+    f.render_widget(ratatui::widgets::Clear, chunks[3]);
+    let keymap_lines = crate::ui::keymap::bar_lines(app.tab_index, app, chunks[3].width as usize);
+    if !keymap_lines.is_empty() {
+        let keymap_bar = Paragraph::new(keymap_lines);
+        f.render_widget(keymap_bar, chunks[3]);
+    }
 
     if app.show_help {
         draw_help(f, size);
@@ -1905,5 +1911,54 @@ mod tests {
             .collect::<Vec<_>>()
             .join("");
         assert!(rendered.contains("not audited (press r in Audit tab)"));
+    }
+
+    fn render_dashboard_to_string(app: &App, width: u16, height: u16) -> String {
+        let backend = ratatui::backend::TestBackend::new(width, height);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw_dashboard(f, app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        buffer
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<Vec<_>>()
+            .join("")
+    }
+
+    #[test]
+    fn dashboard_renders_keymap_bar_on_agents_tab() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        let rendered = render_dashboard_to_string(&app, 200, 24);
+        assert!(rendered.contains("Enter Install"));
+        assert!(rendered.contains("j Next item"));
+        assert!(!rendered.contains("j/k:navigate"));
+    }
+
+    #[test]
+    fn dashboard_renders_keymap_bar_on_audit_tab() {
+        let mut app = App::new();
+        app.tab_index = 5;
+        let rendered = render_dashboard_to_string(&app, 200, 24);
+        assert!(rendered.contains("r Run audit"));
+    }
+
+    #[test]
+    fn dashboard_keymap_bar_occupies_bottom_two_rows() {
+        let app = App::new();
+        let backend = ratatui::backend::TestBackend::new(80, 24);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw_dashboard(f, &app)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let row_text = |y: u16| -> String {
+            (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<Vec<_>>()
+                .join("")
+        };
+        assert!(row_text(22).contains("·") || row_text(22).trim().is_empty());
+        assert!(row_text(23).contains("·"));
+        assert!(row_text(23).contains("Quit"));
     }
 }
