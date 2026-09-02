@@ -17,7 +17,8 @@ pub enum TuiAction {
     Enter,
     New,
     Delete,
-    Sync,
+    SyncExecuteSelected,
+    SyncExecuteAll,
     Edit,
     Insert,
     Update,
@@ -122,8 +123,21 @@ fn skills_bindings() -> Vec<KeyBinding> {
 
 fn sync_bindings() -> Vec<KeyBinding> {
     let when = |app: &App| app.tab_index == 3;
+    let loaded = |app: &App| app.tab_index == 3 && app.sync_loaded;
     vec![
-        scoped(when, "s", "Run sync", TuiAction::Sync),
+        scoped(
+            loaded,
+            "s",
+            "Execute selected",
+            TuiAction::SyncExecuteSelected,
+        ),
+        scoped(loaded, "S", "Execute all", TuiAction::SyncExecuteAll),
+        scoped(
+            loaded,
+            "Enter",
+            "Execute selected (alias of s)",
+            TuiAction::SyncExecuteSelected,
+        ),
         scoped(when, "w", "Workflow", TuiAction::Workflow),
     ]
 }
@@ -228,7 +242,7 @@ mod tests {
     #[test]
     fn bindings_for_tab_non_empty_for_all_tabs() {
         let app = App::new();
-        let expected_totals = [23, 17, 18, 15, 16];
+        let expected_totals = [23, 17, 18, 17, 16];
         for tab in 0..5 {
             let bindings = bindings_for_tab(tab, &app);
             assert!(!bindings.is_empty(), "tab {tab} has no bindings");
@@ -336,7 +350,15 @@ mod tests {
                     ("g", TuiAction::Github),
                 ],
             ),
-            (3, vec![("s", TuiAction::Sync), ("w", TuiAction::Workflow)]),
+            (
+                3,
+                vec![
+                    ("s", TuiAction::SyncExecuteSelected),
+                    ("S", TuiAction::SyncExecuteAll),
+                    ("Enter", TuiAction::SyncExecuteSelected),
+                    ("w", TuiAction::Workflow),
+                ],
+            ),
             (
                 4,
                 vec![

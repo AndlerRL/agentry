@@ -1030,7 +1030,7 @@ fn draw_skill_detail(f: &mut Frame, app: &App, area: Rect) {
 fn draw_sync_list(f: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = if app.sync_results.is_empty() {
         vec![ListItem::new(Line::from(Span::styled(
-            "  Press 's' to load sync plan",
+            "  Loading sync plan...",
             Style::default().fg(Color::DarkGray),
         )))]
     } else {
@@ -1179,7 +1179,7 @@ fn draw_sync_detail(f: &mut Frame, app: &App, area: Rect) {
                     Style::default().fg(Color::DarkGray),
                 )),
                 Line::from(Span::styled(
-                    "  s: Execute sync  w: Generate workflow",
+                    "  s: execute selected · S: execute all · Enter: execute selected",
                     Style::default().fg(Color::Yellow),
                 )),
             ]
@@ -1196,7 +1196,7 @@ fn draw_sync_detail(f: &mut Frame, app: &App, area: Rect) {
         vec![
             Line::from(""),
             Line::from(Span::styled(
-                "  Press 's' to load sync plan",
+                "  Sync plan is loading...",
                 Style::default().fg(Color::DarkGray),
             )),
             Line::from(""),
@@ -1610,8 +1610,12 @@ fn draw_help(f: &mut Frame, area: Rect) {
             Style::default().fg(Color::DarkGray),
         )),
         Line::from(vec![
-            Span::styled("  s          ", Style::default().fg(Color::Yellow)),
-            Span::raw("Load/execute sync plan"),
+            Span::styled("  s/Enter    ", Style::default().fg(Color::Yellow)),
+            Span::raw("Execute selected sync mapping"),
+        ]),
+        Line::from(vec![
+            Span::styled("  S          ", Style::default().fg(Color::Yellow)),
+            Span::raw("Execute all sync mappings"),
         ]),
         Line::from(vec![
             Span::styled("  w          ", Style::default().fg(Color::Yellow)),

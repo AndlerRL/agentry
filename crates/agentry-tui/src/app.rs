@@ -15,6 +15,7 @@ pub struct SyncResultEntry {
     pub destination: String,
     pub status: agentry_core::models::SyncStatus,
     pub action: agentry_core::models::SyncAction,
+    pub mapping: agentry_core::models::SyncMapping,
 }
 
 /// OpenClaw workspace data loaded on startup.
@@ -39,8 +40,10 @@ pub struct App {
     pub skill_hub: Option<agentry_skills::hub::SkillHub>,
     /// Agent skills directories (for symlink creation)
     pub agent_skills_dirs: Vec<PathBuf>,
-    /// Sync plan entries (populated when user presses 's' on Sync tab)
+    /// Sync plan entries (populated when the Sync tab is entered)
     pub sync_results: Vec<SyncResultEntry>,
+    /// True once the sync plan has been loaded for this session
+    pub sync_loaded: bool,
     /// OpenClaw workspace data
     pub openclaw_state: Option<OpenClawState>,
     /// ACP capability matrix
@@ -65,6 +68,8 @@ pub struct App {
     pub show_help: bool,
     /// Skill action pending confirmation
     pub skill_confirm: Option<SkillConfirmAction>,
+    /// Sync execution pending confirmation
+    pub sync_confirm: Option<SyncConfirmAction>,
     /// Error message to display in the status bar (cleared on next key press)
     pub error_message: Option<String>,
     /// Set to true after external editor exits — main loop calls terminal.clear()
@@ -98,6 +103,13 @@ pub enum SkillConfirmAction {
     Remove(String),
     Update(String),
     UpdateAll,
+}
+
+/// Sync execution pending confirmation.
+#[derive(Debug, Clone)]
+pub enum SyncConfirmAction {
+    Selected(agentry_core::models::SyncMapping),
+    All(Vec<agentry_core::models::SyncMapping>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,6 +161,7 @@ impl App {
             skill_hub: None,
             agent_skills_dirs: Vec::new(),
             sync_results: Vec::new(),
+            sync_loaded: false,
             openclaw_state: None,
             acp_capabilities: Vec::new(),
             new_prompt_name: None,
@@ -161,6 +174,7 @@ impl App {
             status_message: None,
             show_help: false,
             skill_confirm: None,
+            sync_confirm: None,
             error_message: None,
             needs_terminal_clear: false,
             method_selected: 0,
@@ -413,6 +427,23 @@ impl App {
             return Ok(());
         }
 
+        // Handle sync confirm action
+        if self.sync_confirm.is_some() {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    let action = self.sync_confirm.take();
+                    if let Some(action) = action {
+                        self.execute_sync_action(action);
+                    }
+                }
+                KeyCode::Char('n') | KeyCode::Esc => {
+                    self.sync_confirm = None;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
         // Handle new prompt name input
         if self.new_prompt_name.is_some() {
             match key.code {
@@ -491,13 +522,17 @@ impl App {
             Some(TuiAction::Help) => self.show_help = !self.show_help,
             Some(TuiAction::NextTab) => self.next_tab(),
             Some(TuiAction::PrevTab) => self.prev_tab(),
-            Some(TuiAction::JumpTab(i)) => self.tab_index = i,
+            Some(TuiAction::JumpTab(i)) => {
+                self.tab_index = i;
+                self.maybe_autoload_sync();
+            }
             Some(TuiAction::ListNext) => self.list_next(),
             Some(TuiAction::ListPrev) => self.list_prev(),
             Some(TuiAction::Enter) => self.on_enter(),
             Some(TuiAction::New) => self.on_new(),
             Some(TuiAction::Delete) => self.on_delete(),
-            Some(TuiAction::Sync) => self.on_sync(),
+            Some(TuiAction::SyncExecuteSelected) => self.execute_selected_sync(),
+            Some(TuiAction::SyncExecuteAll) => self.execute_all_sync(),
             Some(TuiAction::Edit) => self.on_edit(),
             Some(TuiAction::Insert) => self.on_insert(),
             Some(TuiAction::Update) => self.on_update(),
@@ -512,7 +547,7 @@ impl App {
             Some(TuiAction::ListVersions) => self.on_list_versions(),
             Some(TuiAction::Workflow) => self.on_workflow(),
             None => match key.code {
-                KeyCode::Char('s') => self.on_sync(),
+                KeyCode::Char('s') => self.execute_selected_sync(),
                 KeyCode::Char('w') => self.on_workflow(),
                 KeyCode::Char('u') => self.on_update(),
                 KeyCode::Char('i') => self.on_insert(),
@@ -528,6 +563,7 @@ impl App {
         self.tab_index = (self.tab_index + 1) % 5;
         self.list_selected = 0;
         self.method_selected = 0;
+        self.maybe_autoload_sync();
     }
 
     fn prev_tab(&mut self) {
@@ -538,6 +574,14 @@ impl App {
         };
         self.list_selected = 0;
         self.method_selected = 0;
+        self.maybe_autoload_sync();
+    }
+
+    fn maybe_autoload_sync(&mut self) {
+        if self.tab_index == 3 && !self.sync_loaded {
+            self.load_sync_plan();
+            self.sync_loaded = true;
+        }
     }
 
     fn list_next(&mut self) {
@@ -1096,55 +1140,171 @@ impl App {
         }
     }
 
-    fn on_sync(&mut self) {
-        if self.tab_index == 3 {
-            // Sync tab — execute sync for all prompts (agents + projects)
-            let home = self.home_dir.clone();
-            let project_dirs = [home.join("Development")];
-            let agents = self.detected_agents.clone();
+    fn load_sync_plan(&mut self) {
+        let home = self.home_dir.clone();
+        let project_dirs = [home.join("Development")];
+        let agents = self.detected_agents.clone();
 
-            let mut results = Vec::new();
-            for prompt in &self.prompts {
-                // Agent-level sync
-                let plan = agentry_sync::planner::plan_sync(prompt, &agents, &home);
-                let mappings = agentry_sync::executor::check_sync_status(prompt, &plan.mappings);
-                for mapping in &mappings {
+        let mut results = Vec::new();
+        for prompt in &self.prompts {
+            // Agent-level sync
+            let plan = agentry_sync::planner::plan_sync(prompt, &agents, &home);
+            let mappings = agentry_sync::executor::check_sync_status(prompt, &plan.mappings);
+            for mapping in mappings {
+                results.push(SyncResultEntry {
+                    prompt_name: prompt.name.clone(),
+                    agent_id: mapping.agent_id.clone(),
+                    destination: mapping.destination.display().to_string(),
+                    status: mapping.status,
+                    action: mapping.action,
+                    mapping,
+                });
+            }
+
+            // Project-level sync for global prompts
+            let project_mappings =
+                agentry_sync::planner::project_sync_plans(prompt, &project_dirs, &home);
+            if !project_mappings.is_empty() {
+                let checked = agentry_sync::executor::check_sync_status(prompt, &project_mappings);
+                for mapping in checked {
                     results.push(SyncResultEntry {
                         prompt_name: prompt.name.clone(),
                         agent_id: mapping.agent_id.clone(),
                         destination: mapping.destination.display().to_string(),
                         status: mapping.status,
                         action: mapping.action,
+                        mapping,
                     });
                 }
+            }
+        }
 
-                // Project-level sync for global prompts
-                let project_mappings =
-                    agentry_sync::planner::project_sync_plans(prompt, &project_dirs, &home);
-                if !project_mappings.is_empty() {
-                    let checked =
-                        agentry_sync::executor::check_sync_status(prompt, &project_mappings);
-                    for mapping in &checked {
-                        results.push(SyncResultEntry {
-                            prompt_name: prompt.name.clone(),
-                            agent_id: mapping.agent_id.clone(),
-                            destination: mapping.destination.display().to_string(),
-                            status: mapping.status,
-                            action: mapping.action,
-                        });
-                    }
+        self.sync_results = results;
+        self.status_message = Some(format!(
+            "Sync plan loaded ({} mappings)",
+            self.sync_results.len()
+        ));
+        self.list_selected = 0;
+    }
+
+    fn selected_sync_mapping(&self) -> Option<agentry_core::models::SyncMapping> {
+        self.selected_sync_entry()
+            .map(|entry| entry.mapping.clone())
+    }
+
+    fn execute_selected_sync(&mut self) {
+        if self.tab_index != 3 {
+            return;
+        }
+        if !self.sync_loaded {
+            self.status_message = Some("Sync plan not loaded yet".into());
+            return;
+        }
+        match self.selected_sync_mapping() {
+            Some(mapping) if mapping.action != agentry_core::models::SyncAction::Skip => {
+                self.status_message = Some(format!(
+                    "Sync {} to {}? (y/n)",
+                    mapping.prompt_id, mapping.agent_id
+                ));
+                self.sync_confirm = Some(SyncConfirmAction::Selected(mapping));
+            }
+            Some(_) => {
+                self.status_message = Some("Selected mapping is skipped".into());
+            }
+            None => {
+                self.status_message = Some("Select a sync entry first".into());
+            }
+        }
+    }
+
+    fn execute_all_sync(&mut self) {
+        if self.tab_index != 3 {
+            return;
+        }
+        if !self.sync_loaded {
+            self.status_message = Some("Sync plan not loaded yet".into());
+            return;
+        }
+        let mappings: Vec<agentry_core::models::SyncMapping> = self
+            .sync_results
+            .iter()
+            .filter(|entry| entry.action != agentry_core::models::SyncAction::Skip)
+            .map(|entry| entry.mapping.clone())
+            .collect();
+        if mappings.is_empty() {
+            self.status_message = Some("No executable sync mappings".into());
+            return;
+        }
+        let count = mappings.len();
+        self.sync_confirm = Some(SyncConfirmAction::All(mappings));
+        self.status_message = Some(format!("Execute {} sync mappings? (y/n)", count));
+    }
+
+    fn execute_sync_action(&mut self, action: SyncConfirmAction) {
+        let (success_message, grouped): (
+            String,
+            Vec<(String, Vec<agentry_core::models::SyncMapping>)>,
+        ) = match action {
+            SyncConfirmAction::Selected(mapping) => (
+                format!(
+                    "Synced {} to {}",
+                    mapping.prompt_id,
+                    mapping.destination.display()
+                ),
+                vec![(mapping.prompt_id.clone(), vec![mapping])],
+            ),
+            SyncConfirmAction::All(mappings) => {
+                let count = mappings.len();
+                let mut groups: std::collections::BTreeMap<String, Vec<_>> =
+                    std::collections::BTreeMap::new();
+                for m in mappings {
+                    groups.entry(m.prompt_id.clone()).or_default().push(m);
+                }
+                (
+                    format!("Executed {} mappings", count),
+                    groups.into_iter().collect(),
+                )
+            }
+        };
+
+        let mut executed = 0usize;
+        let mut errors: Vec<String> = Vec::new();
+        for (prompt_id, mappings) in &grouped {
+            let prompt = match self.prompts.iter().find(|p| &p.id == prompt_id) {
+                Some(p) => p.clone(),
+                None => {
+                    errors.push(format!("Prompt '{}' not found", prompt_id));
+                    continue;
+                }
+            };
+            for result in agentry_sync::executor::execute_sync(&prompt, mappings, false) {
+                if result.success {
+                    executed += 1;
+                } else {
+                    errors.push(format!("{}: {}", result.mapping.agent_id, result.message));
                 }
             }
-
-            self.sync_results = results;
-            self.status_message = Some(format!(
-                "Sync plan loaded ({} mappings)",
-                self.sync_results.len()
-            ));
-            self.list_selected = 0;
-        } else {
-            self.status_message = Some("Sync: switch to Sync tab (4) to execute".into());
         }
+
+        self.refresh_sync_plan();
+
+        if errors.is_empty() {
+            self.status_message = Some(success_message);
+        } else {
+            self.error_message = Some(format!(
+                "Executed {}, {} failed: {}",
+                executed,
+                errors.len(),
+                errors.join("; ")
+            ));
+        }
+    }
+
+    fn refresh_sync_plan(&mut self) {
+        let selected = self.list_selected;
+        self.load_sync_plan();
+        self.list_selected = selected;
+        self.sync_loaded = true;
     }
 
     fn on_run_audit(&mut self) {
@@ -2019,5 +2179,201 @@ mod tests {
         assert!(non_oc.status_message.is_none());
         assert!(non_oc.agent_confirm.is_none());
         assert!(non_oc.new_prompt_name.is_none());
+    }
+
+    fn sync_test_prompt(name: &str) -> agentry_core::models::UnifiedPrompt {
+        agentry_core::models::UnifiedPrompt {
+            id: name.to_string(),
+            name: name.to_string(),
+            description: String::new(),
+            frontmatter: std::collections::BTreeMap::new(),
+            body: "Test sync content".to_string(),
+            xml_tags: vec![],
+            scope: agentry_core::models::PromptScope::Global,
+            source_format: agentry_core::models::PromptFormat::PlainMd,
+            source_path: None,
+        }
+    }
+
+    fn sync_agent(id: &str, config_dir: &str, filename: &str) -> DetectedAgent {
+        DetectedAgent {
+            spec: agentry_core::models::AgentSpec {
+                id: id.to_string(),
+                name: id.to_string(),
+                cli_binary: id.to_string(),
+                config_dir: config_dir.to_string(),
+                prompt_filename: filename.to_string(),
+                prompt_format: agentry_core::models::PromptFormat::PlainMd,
+                skills_dir_name: None,
+                max_size: None,
+                install_methods: Vec::new(),
+            },
+            installed: true,
+            version: None,
+            config_dir_exists: true,
+            prompt_file_exists: false,
+            skills_dir: None,
+            skills_symlink_pattern: None,
+            installed_skills: Vec::new(),
+            detected_methods: Vec::new(),
+        }
+    }
+
+    fn sync_app(name: &str) -> (App, PathBuf) {
+        let tmp = std::env::temp_dir().join(format!("agentry-sync-test-{}", name));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let mut app = App::new();
+        app.tab_index = 3;
+        app.home_dir = tmp.clone();
+        app.prompts = vec![sync_test_prompt("alpha"), sync_test_prompt("beta")];
+        app.detected_agents = vec![sync_agent("claude-code", ".claude", "CLAUDE.md")];
+        (app, tmp)
+    }
+
+    #[test]
+    fn sync_tab_entry_autoloads_plan_once() {
+        let (mut app, tmp) = sync_app("autoload");
+        assert!(!app.sync_loaded);
+        assert!(app.sync_results.is_empty());
+
+        app.tab_index = 0;
+        app.next_tab();
+        app.next_tab();
+        app.next_tab();
+        assert_eq!(app.tab_index, 3);
+        assert!(app.sync_loaded);
+        assert!(!app.sync_results.is_empty());
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|m| m.starts_with("Sync plan loaded")));
+
+        let count_after_first = app.sync_results.len();
+        app.prev_tab();
+        app.next_tab();
+        assert_eq!(app.sync_results.len(), count_after_first);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn sync_confirm_flow_executes_and_refreshes_plan() {
+        let (mut app, tmp) = sync_app("confirm");
+        app.load_sync_plan();
+        app.sync_loaded = true;
+
+        let dest = app.sync_results[0].mapping.destination.clone();
+        app.list_selected = 1;
+        press(&mut app, KeyCode::Char('s'));
+        assert!(app.sync_confirm.is_some());
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("Sync alpha to claude-code? (y/n)")
+        );
+
+        press(&mut app, KeyCode::Char('y'));
+        assert!(app.sync_confirm.is_none());
+        assert!(dest.exists());
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some(format!("Synced alpha to {}", dest.display()).as_str())
+        );
+        assert_eq!(
+            app.sync_results[0].mapping.status,
+            agentry_core::models::SyncStatus::UpToDate
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn sync_confirm_cancelled_with_n() {
+        let (mut app, tmp) = sync_app("cancel");
+        app.sync_confirm = Some(SyncConfirmAction::All(Vec::new()));
+        press(&mut app, KeyCode::Char('n'));
+        assert!(app.sync_confirm.is_none());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn execute_all_collects_non_skip_only() {
+        let (mut app, tmp) = sync_app("all-skip");
+        app.detected_agents
+            .push(sync_agent("unknown-agent", ".unknown-agent", "AGENTS.md"));
+        app.load_sync_plan();
+        app.sync_loaded = true;
+
+        let skip_count = app
+            .sync_results
+            .iter()
+            .filter(|e| e.action == agentry_core::models::SyncAction::Skip)
+            .count();
+        assert!(skip_count > 0);
+
+        app.list_selected = 1;
+        press(&mut app, KeyCode::Char('S'));
+        let expected = app.sync_results.len() - skip_count;
+        match &app.sync_confirm {
+            Some(SyncConfirmAction::All(mappings)) => {
+                assert!(mappings
+                    .iter()
+                    .all(|m| m.action != agentry_core::models::SyncAction::Skip));
+                assert_eq!(mappings.len(), expected);
+                assert_eq!(
+                    app.status_message.as_deref(),
+                    Some(format!("Execute {} sync mappings? (y/n)", expected).as_str())
+                );
+            }
+            _ => panic!("expected All confirm"),
+        }
+
+        press(&mut app, KeyCode::Char('y'));
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some(format!("Executed {} mappings", expected).as_str())
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn execute_selected_skips_skip_action_and_guards_plan() {
+        let (mut app, tmp) = sync_app("skip-guard");
+        app.execute_selected_sync();
+        assert!(app.sync_confirm.is_none());
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("Sync plan not loaded yet")
+        );
+
+        app.detected_agents
+            .push(sync_agent("unknown-agent", ".unknown-agent", "AGENTS.md"));
+        app.load_sync_plan();
+        app.sync_loaded = true;
+        let skip_row = app
+            .sync_results
+            .iter()
+            .position(|e| e.action == agentry_core::models::SyncAction::Skip)
+            .expect("fixture has a Skip mapping");
+        app.list_selected = skip_row + 1;
+        app.execute_selected_sync();
+        assert!(app.sync_confirm.is_none());
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("Selected mapping is skipped")
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn sync_enter_is_alias_of_execute_selected() {
+        let (mut app, tmp) = sync_app("enter-alias");
+        app.load_sync_plan();
+        app.sync_loaded = true;
+        app.list_selected = 1;
+        press(&mut app, KeyCode::Enter);
+        assert!(app.sync_confirm.is_some());
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
