@@ -118,13 +118,19 @@ pub fn sanitize_finding(
     })
 }
 
-pub fn parse_findings(response: &str, home_dir: &Path, max_findings: usize) -> Vec<AuditFinding> {
+#[derive(Debug, Clone)]
+pub enum ParseReport {
+    Unparseable,
+    Findings(Vec<AuditFinding>),
+}
+
+pub fn parse_findings(response: &str, home_dir: &Path, max_findings: usize) -> ParseReport {
     let Some(json) = extract_last_json_array(response) else {
-        return Vec::new();
+        return ParseReport::Unparseable;
     };
     let raw: Vec<RawFinding> = match serde_json::from_str(&json) {
         Ok(raw) => raw,
-        Err(_) => return Vec::new(),
+        Err(_) => return ParseReport::Unparseable,
     };
     let allowlist = default_allowlist(home_dir);
     let mut seen: HashSet<String> = HashSet::new();
@@ -141,7 +147,7 @@ pub fn parse_findings(response: &str, home_dir: &Path, max_findings: usize) -> V
         }
         findings.push(finding);
     }
-    findings
+    ParseReport::Findings(findings)
 }
 
 #[cfg(test)]
@@ -275,7 +281,9 @@ mod tests {
             ));
         }
         let response = format!("[{}]", items.join(","));
-        let findings = parse_findings(&response, &home, 3);
+        let ParseReport::Findings(findings) = parse_findings(&response, &home, 3) else {
+            panic!("expected findings");
+        };
         assert_eq!(findings.len(), 3);
         let ids: Vec<&str> = findings.iter().map(|f| f.check_id.as_str()).collect();
         assert_eq!(ids, ["auditor.dup", "auditor.unique0", "auditor.unique1"]);
@@ -286,7 +294,9 @@ mod tests {
     fn parse_handles_skill_request() {
         let home = temp_home("agentry_test_parse_skill");
         let response = r#"[{"skill_request":"context-engineering-collection"}]"#;
-        let findings = parse_findings(response, &home, 20);
+        let ParseReport::Findings(findings) = parse_findings(response, &home, 20) else {
+            panic!("expected findings");
+        };
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].check_id, "auditor.skill_request");
         assert_eq!(findings[0].severity, Severity::Suggestion);
@@ -295,10 +305,36 @@ mod tests {
     }
 
     #[test]
-    fn parse_returns_empty_on_garbage() {
+    fn parse_marks_garbage_unparseable() {
         let home = temp_home("agentry_test_parse_garbage");
-        assert!(parse_findings("not json at all", &home, 20).is_empty());
-        assert!(parse_findings("[]", &home, 20).is_empty());
+        assert!(matches!(
+            parse_findings("not json at all", &home, 20),
+            ParseReport::Unparseable
+        ));
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn parse_distinguishes_valid_empty_array() {
+        let home = temp_home("agentry_test_parse_empty");
+        assert!(matches!(
+            parse_findings("[]", &home, 20),
+            ParseReport::Findings(ref findings) if findings.is_empty()
+        ));
+        assert!(matches!(
+            parse_findings("here is the verdict: []", &home, 20),
+            ParseReport::Findings(ref findings) if findings.is_empty()
+        ));
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn parse_distinguishes_unparseable_array() {
+        let home = temp_home("agentry_test_parse_bad_array");
+        assert!(matches!(
+            parse_findings("[{\"check_id\":]", &home, 20),
+            ParseReport::Unparseable
+        ));
         std::fs::remove_dir_all(&home).unwrap();
     }
 }

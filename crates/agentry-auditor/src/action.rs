@@ -11,7 +11,7 @@ use agentry_harness::hosts::{config_hosts, first_installed, host_by_id, resolve_
 
 use crate::config::{load_config, AuditorConfig};
 use crate::context::{package, prioritized_findings, AuditorContext};
-use crate::parse::parse_findings;
+use crate::parse::{parse_findings, ParseReport};
 use crate::prompt::build_prompt;
 
 pub struct AuditorReviewAction;
@@ -41,6 +41,23 @@ fn run_failed_finding(message: &str, stderr: &str) -> AuditFinding {
         category: FindingCategory::Audited,
         agent_id: None,
         message: message.to_string(),
+        remediation: "check the host CLI configuration and retry".to_string(),
+        auto_fixable: false,
+        fix: None,
+        suggested_fix: None,
+        evidence: Some(excerpt),
+    }
+}
+
+fn unparseable_finding(stdout: &str) -> AuditFinding {
+    let excerpt: String = stdout.chars().take(200).collect();
+    AuditFinding {
+        check_id: "auditor.run_failed".to_string(),
+        severity: Severity::Info,
+        category: FindingCategory::Audited,
+        agent_id: None,
+        message: "host exited 0 but the review output yielded no parseable findings; treat as inconclusive"
+            .to_string(),
         remediation: "check the host CLI configuration and retry".to_string(),
         auto_fixable: false,
         fix: None,
@@ -233,7 +250,13 @@ impl HarnessAction for AuditorReviewAction {
             });
             let findings = match result {
                 Ok(invoke_result) => {
-                    parse_findings(&invoke_result.stdout, &ctx.home_dir, config.max_findings)
+                    match parse_findings(&invoke_result.stdout, &ctx.home_dir, config.max_findings)
+                    {
+                        ParseReport::Findings(findings) => findings,
+                        ParseReport::Unparseable => {
+                            vec![unparseable_finding(&invoke_result.stdout)]
+                        }
+                    }
                 }
                 Err(InvokeError::Exit { stderr, .. }) => {
                     vec![run_failed_finding("host invocation failed", &stderr)]
@@ -350,6 +373,47 @@ mod tests {
         assert!(finding.evidence.as_deref().unwrap().contains("kaboom"));
     }
 
+    #[test]
+    fn unparseable_is_run_failed_with_evidence() {
+        let finding = unparseable_finding(&"x".repeat(300));
+        assert_eq!(finding.check_id, "auditor.run_failed");
+        assert_eq!(finding.severity, Severity::Info);
+        assert_eq!(finding.category, FindingCategory::Audited);
+        assert_eq!(finding.evidence.as_deref().unwrap().chars().count(), 200);
+    }
+
+    fn fake_host(prefix: &str) -> std::path::PathBuf {
+        let home = temp_home(prefix);
+        let path = home.join("fake_host");
+        std::fs::write(&path, "#!/bin/sh\ncat >/dev/null\ncat \"$1\"\nexit 0\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&path, perms).unwrap();
+        path
+    }
+
+    fn auditor_ctx(
+        home: &std::path::Path,
+        script: &std::path::Path,
+        payload: &str,
+    ) -> HarnessContext {
+        std::fs::create_dir_all(home.join(".agents")).unwrap();
+        let payload_path = home.join("payload.txt");
+        std::fs::write(&payload_path, payload).unwrap();
+        std::fs::write(
+            home.join(".agents").join("agentry.toml"),
+            format!(
+                "[hosts]\npriority = [\"ollama\"]\n\n[hosts.ollama]\ndetect_binary = \"{}\"\n\n[auditor]\nhost_cli = \"ollama\"\ncommand_template = \"{} {}\"\n",
+                script.display(),
+                script.display(),
+                payload_path.display(),
+            ),
+        )
+        .unwrap();
+        HarnessContext::new(home.to_path_buf(), Vec::new(), Vec::new())
+    }
+
     #[tokio::test]
     async fn execute_without_host_returns_no_host_finding() {
         let home = temp_home("agentry_test_auditor_no_host");
@@ -386,6 +450,82 @@ mod tests {
             }
             other => panic!("unexpected output: {other:?}"),
         }
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    async fn run_with_host(
+        home: &std::path::Path,
+        prefix: &str,
+        payload: &str,
+    ) -> (usize, AuditReport) {
+        let script = fake_host(prefix);
+        let ctx = auditor_ctx(home, &script, payload).with_report(Some(empty_report()));
+        let mut registry = agentry_harness::HarnessRegistry::new();
+        registry.register(Box::new(AuditorReviewAction));
+        let output = registry
+            .invoke_confirmed(
+                &ctx,
+                "auditor.review",
+                ActionInput::AuditorReview {
+                    focus_check_id: None,
+                },
+            )
+            .await
+            .unwrap();
+        std::fs::remove_dir_all(&script.parent().unwrap()).unwrap();
+        match output {
+            ActionOutput::AuditorMerged { added, report } => (added, report),
+            other => panic!("unexpected output: {other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn exit_zero_garbage_stdout_yields_run_failed() {
+        let home = temp_home("agentry_test_auditor_garbage");
+        let (added, report) =
+            run_with_host(&home, "agentry_test_auditor_host_garbage", "no json at all").await;
+        assert_eq!(added, 1);
+        let finding = report
+            .global_findings
+            .iter()
+            .find(|f| f.check_id == "auditor.run_failed")
+            .expect("run_failed finding");
+        assert_eq!(finding.severity, Severity::Info);
+        assert!(finding
+            .evidence
+            .as_deref()
+            .unwrap()
+            .contains("no json at all"));
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn exit_zero_valid_empty_array_is_all_clear() {
+        let home = temp_home("agentry_test_auditor_all_clear");
+        let (added, report) =
+            run_with_host(&home, "agentry_test_auditor_host_clear", "verdict: []").await;
+        assert_eq!(added, 0);
+        assert!(!report
+            .global_findings
+            .iter()
+            .any(|f| f.check_id == "auditor.run_failed"));
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn exit_zero_malformed_array_yields_run_failed() {
+        let home = temp_home("agentry_test_auditor_malformed");
+        let (added, report) = run_with_host(
+            &home,
+            "agentry_test_auditor_host_malformed",
+            "[\"unterminated",
+        )
+        .await;
+        assert_eq!(added, 1);
+        assert!(report
+            .global_findings
+            .iter()
+            .any(|f| f.check_id == "auditor.run_failed"));
         std::fs::remove_dir_all(&home).unwrap();
     }
 
