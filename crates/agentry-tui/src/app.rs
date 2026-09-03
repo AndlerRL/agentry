@@ -670,6 +670,7 @@ impl App {
         if max > 0 && self.list_selected < max - 1 {
             self.list_selected += 1;
         }
+        self.clamp_method_selection();
     }
 
     fn list_prev(&mut self) {
@@ -680,6 +681,7 @@ impl App {
         if self.list_selected > 0 {
             self.list_selected -= 1;
         }
+        self.clamp_method_selection();
     }
 
     /// Build the confirm action installing the currently selected version,
@@ -688,11 +690,13 @@ impl App {
         let Some(agent) = self.detected_agents.get(self.list_selected) else {
             self.version_list = None;
             self.version_selected = 0;
+            self.status_message = Some("No agent selected".into());
             return;
         };
         let Some(method) = agent.spec.install_methods.get(self.method_selected) else {
             self.version_list = None;
             self.version_selected = 0;
+            self.status_message = Some("No install method available for this agent".into());
             return;
         };
         let version = self
@@ -1207,7 +1211,13 @@ impl App {
                                     method.label()
                                 ));
                             }
+                        } else {
+                            self.status_message =
+                                Some(format!("{} is not available on this OS", method.label()));
                         }
+                    } else {
+                        self.status_message =
+                            Some("No install method available for this agent".into());
                     }
                 }
             }
@@ -1637,10 +1647,25 @@ impl App {
         }
     }
 
+    fn clamp_method_selection(&mut self) {
+        if self.tab_index != 0 {
+            return;
+        }
+        if let Some(agent) = self.detected_agents.get(self.list_selected) {
+            let max = agent.spec.install_methods.len();
+            if max == 0 {
+                self.method_selected = 0;
+            } else if self.method_selected >= max {
+                self.method_selected = max - 1;
+            }
+        }
+    }
+
     fn method_prev(&mut self) {
         if self.tab_index != 0 {
             return;
         }
+        self.clamp_method_selection();
         if self.method_selected > 0 {
             self.method_selected -= 1;
         }
@@ -1648,6 +1673,7 @@ impl App {
 
     fn method_next(&mut self) {
         if self.tab_index == 0 {
+            self.clamp_method_selection();
             if let Some(agent) = self.detected_agents.get(self.list_selected) {
                 let max = agent.spec.install_methods.len();
                 if max > 0 && self.method_selected < max - 1 {
@@ -1696,6 +1722,8 @@ impl App {
                         self.version_list_error = Some(format!("Error: {}", e));
                     }
                 }
+            } else {
+                self.status_message = Some("No install method available for this agent".into());
             }
         }
     }
@@ -1783,6 +1811,8 @@ impl App {
                             method.label()
                         ));
                     }
+                } else {
+                    self.status_message = Some("No install method available for this agent".into());
                 }
             }
         } else if self.tab_index == 2 {
@@ -1829,6 +1859,8 @@ impl App {
                             method.label()
                         ));
                     }
+                } else {
+                    self.status_message = Some("No install method available for this agent".into());
                 }
             }
         } else if self.tab_index == 2 {
@@ -3132,5 +3164,197 @@ mod tests {
             }
             other => panic!("expected Install confirm, got {:?}", other),
         }
+    }
+
+    fn single_method_agent() -> DetectedAgent {
+        DetectedAgent {
+            spec: agentry_core::models::AgentSpec {
+                id: "antigravity".to_string(),
+                name: "Antigravity".to_string(),
+                cli_binary: "antigravity".to_string(),
+                config_dir: ".antigravity".to_string(),
+                prompt_filename: "SKILL.md".to_string(),
+                prompt_format: agentry_core::models::PromptFormat::FrontmatterMd,
+                skills_dir_name: None,
+                max_size: None,
+                install_methods: vec![agentry_core::models::InstallMethod::DirectDownload {
+                    url: "https://antigravity.google/download".to_string(),
+                    binary_name: "antigravity".to_string(),
+                }],
+            },
+            installed: false,
+            version: None,
+            config_dir_exists: true,
+            prompt_file_exists: false,
+            skills_dir: None,
+            skills_symlink_pattern: None,
+            installed_skills: Vec::new(),
+            detected_methods: Vec::new(),
+        }
+    }
+
+    fn no_method_agent() -> DetectedAgent {
+        DetectedAgent {
+            spec: agentry_core::models::AgentSpec {
+                id: "unknown".to_string(),
+                name: "Unknown".to_string(),
+                cli_binary: "unknown".to_string(),
+                config_dir: ".unknown".to_string(),
+                prompt_filename: "AGENTS.md".to_string(),
+                prompt_format: agentry_core::models::PromptFormat::PlainMd,
+                skills_dir_name: None,
+                max_size: None,
+                install_methods: Vec::new(),
+            },
+            installed: false,
+            version: None,
+            config_dir_exists: true,
+            prompt_file_exists: false,
+            skills_dir: None,
+            skills_symlink_pattern: None,
+            installed_skills: Vec::new(),
+            detected_methods: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn enter_out_of_range_method_shows_message_not_silent() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![single_method_agent()];
+        app.method_selected = 3;
+
+        press(&mut app, KeyCode::Enter);
+
+        assert!(app.agent_confirm.is_none());
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("No install method available for this agent")
+        );
+    }
+
+    #[test]
+    fn enter_zero_method_agent_shows_message_not_silent() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![no_method_agent()];
+
+        press(&mut app, KeyCode::Enter);
+
+        assert!(app.agent_confirm.is_none());
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("No install method available for this agent")
+        );
+    }
+
+    #[test]
+    fn update_out_of_range_method_shows_message_not_silent() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![single_method_agent()];
+        app.method_selected = 3;
+
+        press(&mut app, KeyCode::Char('u'));
+
+        assert!(app.agent_confirm.is_none());
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("No install method available for this agent")
+        );
+    }
+
+    #[test]
+    fn remove_out_of_range_method_shows_message_not_silent() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![single_method_agent()];
+        app.method_selected = 3;
+
+        press(&mut app, KeyCode::Char('r'));
+
+        assert!(app.agent_confirm.is_none());
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("No install method available for this agent")
+        );
+    }
+
+    #[test]
+    fn list_versions_out_of_range_method_shows_message_not_silent() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![single_method_agent()];
+        app.method_selected = 3;
+
+        press(&mut app, KeyCode::Char('v'));
+
+        assert!(app.version_list.is_none());
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("No install method available for this agent")
+        );
+    }
+
+    #[test]
+    fn list_versions_no_command_method_shows_message() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![single_method_agent()];
+
+        press(&mut app, KeyCode::Char('v'));
+
+        assert!(app.version_list.is_none());
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("Version listing not supported for this method")
+        );
+    }
+
+    #[test]
+    fn list_navigation_clamps_method_selection() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![version_flow_agent(), single_method_agent()];
+        app.method_selected = 0;
+
+        press(&mut app, KeyCode::Char('j'));
+        assert_eq!(app.list_selected, 1);
+        assert_eq!(app.method_selected, 0, "clamped to single-method agent");
+
+        press(&mut app, KeyCode::Char('k'));
+        assert_eq!(app.list_selected, 0);
+        assert_eq!(app.method_selected, 0);
+    }
+
+    #[test]
+    fn method_next_clamps_to_agent_method_count() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![single_method_agent()];
+        app.method_selected = 0;
+
+        press(&mut app, KeyCode::Right);
+        assert_eq!(app.method_selected, 0, "must not exceed method count");
+
+        press(&mut app, KeyCode::Left);
+        assert_eq!(app.method_selected, 0, "must not go below zero");
+    }
+
+    #[test]
+    fn enter_already_detected_method_shows_message() {
+        let mut agent = single_method_agent();
+        agent.detected_methods = agent.spec.install_methods.clone();
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![agent];
+
+        press(&mut app, KeyCode::Enter);
+
+        assert!(app.agent_confirm.is_none());
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("Antigravity already installed via Direct Download")
+        );
     }
 }
