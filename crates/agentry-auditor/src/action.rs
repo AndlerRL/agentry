@@ -6,7 +6,7 @@ use agentry_harness::action::{
 };
 use agentry_harness::context::HarnessContext;
 use agentry_harness::gate::GateTicket;
-use agentry_harness::hosts::invoke::{invoke_headless, with_suspended_terminal, InvokeError};
+use agentry_harness::hosts::invoke::{invoke_headless_suspended, InvokeError};
 use agentry_harness::hosts::{config_hosts, first_installed, host_by_id, resolve_hosts};
 
 use crate::config::{load_config, AuditorConfig};
@@ -225,23 +225,14 @@ impl HarnessAction for AuditorReviewAction {
                 .model
                 .clone()
                 .or_else(|| ctx.config.local.model.clone());
-            let result = with_suspended_terminal(|| {
-                tokio::task::block_in_place(|| {
-                    let rt = tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build();
-                    match rt {
-                        Ok(rt) => rt.block_on(invoke_headless(
-                            host,
-                            config.command_template.as_deref(),
-                            model.as_deref(),
-                            &prompt,
-                            config.timeout_secs,
-                        )),
-                        Err(err) => Err(InvokeError::Io(err.to_string())),
-                    }
-                })
-            });
+            let result = invoke_headless_suspended(
+                host,
+                config.command_template.as_deref(),
+                model.as_deref(),
+                &prompt,
+                config.timeout_secs,
+            )
+            .await;
             let mut report = ctx.report.clone().unwrap_or_else(|| {
                 agentry_audit::engine::run_audit(&agentry_audit::engine::build_context(
                     &ctx.home_dir,
@@ -523,6 +514,23 @@ mod tests {
         .await;
         assert_eq!(added, 1);
         assert!(report
+            .global_findings
+            .iter()
+            .any(|f| f.check_id == "auditor.run_failed"));
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[tokio::test]
+    async fn execute_in_current_thread_runtime_does_not_panic() {
+        let home = temp_home("agentry_test_auditor_current_thread");
+        let (added, report) = run_with_host(
+            &home,
+            "agentry_test_auditor_host_current_thread",
+            "verdict: []",
+        )
+        .await;
+        assert_eq!(added, 0);
+        assert!(!report
             .global_findings
             .iter()
             .any(|f| f.check_id == "auditor.run_failed"));

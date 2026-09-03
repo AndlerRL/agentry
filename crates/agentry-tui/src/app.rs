@@ -3357,4 +3357,542 @@ mod tests {
             Some("Antigravity already installed via Direct Download")
         );
     }
+
+    fn fixture_prompt(name: &str, path: PathBuf) -> agentry_core::models::UnifiedPrompt {
+        agentry_core::models::UnifiedPrompt {
+            id: name.to_string(),
+            name: name.to_string(),
+            description: String::new(),
+            frontmatter: std::collections::BTreeMap::new(),
+            body: format!("# {}\n\nBody", name),
+            xml_tags: vec![],
+            scope: agentry_core::models::PromptScope::Global,
+            source_format: agentry_core::models::PromptFormat::PlainMd,
+            source_path: Some(path),
+        }
+    }
+
+    fn prompts_app(fixture: &str, prompt_name: &str) -> (App, PathBuf) {
+        let tmp = std::env::temp_dir().join(format!(
+            "agentry-prompts-{}-{}",
+            fixture,
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let dir = tmp.join(".agents").join("prompts");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{}.md", prompt_name));
+        std::fs::write(&path, format!("# {}\n\nBody", prompt_name)).unwrap();
+        let mut app = App::new();
+        app.tab_index = 1;
+        app.home_dir = tmp.clone();
+        app.prompts = vec![fixture_prompt(prompt_name, path)];
+        (app, tmp)
+    }
+
+    fn prompts_delete_app(fixture: &str) -> (App, PathBuf) {
+        let (mut app, tmp) = prompts_app(fixture, "alpha");
+        app.list_selected = 1;
+        (app, tmp)
+    }
+
+    #[test]
+    fn prompts_delete_confirm_removes_file_and_entry() {
+        let (mut app, tmp) = prompts_delete_app("delete");
+        let file = tmp.join(".agents").join("prompts").join("alpha.md");
+        press(&mut app, KeyCode::Char('d'));
+        assert_eq!(app.delete_confirm, Some(0));
+        assert_eq!(app.status_message.as_deref(), Some("Delete 'alpha'? (y/n)"));
+        press(&mut app, KeyCode::Char('y'));
+        assert!(app.delete_confirm.is_none());
+        assert!(!file.exists(), "prompt file must be deleted");
+        assert!(app.prompts.is_empty(), "deleted prompt must leave the list");
+        assert_eq!(app.status_message.as_deref(), Some("Deleted prompt: alpha"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn prompts_delete_cancelled_with_n() {
+        let (mut app, tmp) = prompts_delete_app("delete-n");
+        let file = tmp.join(".agents").join("prompts").join("alpha.md");
+        press(&mut app, KeyCode::Char('d'));
+        press(&mut app, KeyCode::Char('n'));
+        assert!(app.delete_confirm.is_none());
+        assert!(file.exists(), "cancelled delete must not touch the file");
+        assert_eq!(app.prompts.len(), 1);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn prompts_delete_cancelled_with_esc() {
+        let (mut app, tmp) = prompts_delete_app("delete-esc");
+        let file = tmp.join(".agents").join("prompts").join("alpha.md");
+        press(&mut app, KeyCode::Char('d'));
+        press(&mut app, KeyCode::Esc);
+        assert!(app.delete_confirm.is_none());
+        assert!(file.exists());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn prompts_new_typing_enter_creates_template_file() {
+        let (mut app, tmp) = prompts_app("new", "alpha");
+        std::env::set_var("EDITOR", "true");
+        press(&mut app, KeyCode::Char('n'));
+        assert_eq!(app.new_prompt_name, Some(String::new()));
+        for c in ['b', 'e', 't', 'a'] {
+            press(&mut app, KeyCode::Char(c));
+        }
+        assert_eq!(app.new_prompt_name.as_deref(), Some("beta"));
+        press(&mut app, KeyCode::Enter);
+        assert!(app.new_prompt_name.is_none());
+        let created = tmp.join(".agents").join("prompts").join("beta.md");
+        let content = std::fs::read_to_string(&created).unwrap();
+        assert_eq!(
+            content,
+            "# beta\n\n<!-- Write your prompt content here -->\n"
+        );
+        assert_eq!(app.status_message.as_deref(), Some("Created prompt: beta"));
+        assert!(app.prompts.iter().any(|p| p.name == "beta"));
+        std::env::remove_var("EDITOR");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn prompts_new_esc_cancels_without_file() {
+        let (mut app, tmp) = prompts_app("new-esc", "alpha");
+        press(&mut app, KeyCode::Char('n'));
+        press(&mut app, KeyCode::Char('x'));
+        press(&mut app, KeyCode::Esc);
+        assert!(app.new_prompt_name.is_none());
+        assert!(!tmp.join(".agents").join("prompts").join("x.md").exists());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn prompts_new_empty_name_ignored_on_enter() {
+        let (mut app, tmp) = prompts_app("new-empty", "alpha");
+        std::env::set_var("EDITOR", "true");
+        press(&mut app, KeyCode::Char('n'));
+        press(&mut app, KeyCode::Enter);
+        assert!(app.new_prompt_name.is_none());
+        assert_eq!(
+            app.prompts.len(),
+            1,
+            "no prompt may be created for empty name"
+        );
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("Enter prompt name, then press Enter")
+        );
+        std::env::remove_var("EDITOR");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prompts_edit_shells_to_editor_and_reloads_body() {
+        let (mut app, tmp) = prompts_app("edit", "alpha");
+        let script = tmp.join("fake-editor.sh");
+        std::fs::write(&script, "#!/bin/sh\nprintf '# edited body\\n' > \"$1\"\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+        std::env::set_var("EDITOR", &script);
+        app.list_selected = 1;
+        press(&mut app, KeyCode::Char('e'));
+        assert_eq!(app.prompts[0].body, "# edited body\n");
+        assert_eq!(app.status_message.as_deref(), Some("Edited: alpha"));
+        std::env::remove_var("EDITOR");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    fn skills_app(fixture: &str) -> (App, PathBuf) {
+        let tmp =
+            std::env::temp_dir().join(format!("agentry-skills-{}-{}", fixture, std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let mut app = App::new();
+        app.tab_index = 2;
+        app.home_dir = tmp.clone();
+        (app, tmp)
+    }
+
+    fn installed_skill_hub_app(fixture: &str) -> (App, PathBuf) {
+        let (mut app, tmp) = skills_app(fixture);
+        let lockfile_path = tmp.join(".agents").join(".skill-lock.json");
+        std::fs::create_dir_all(lockfile_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &lockfile_path,
+            r#"{"version":3,"skills":{"test-skill":{"source":"vercel-labs/agent-skills","sourceType":"git","sourceUrl":"https://github.com/vercel-labs/agent-skills.git","skillPath":"skills/test-skill/SKILL.md","skillFolderHash":"abc","installedAt":"2026-01-01","updatedAt":"2026-01-01"}},"dismissed":{},"lastSelectedAgents":[]}"#,
+        )
+        .unwrap();
+        let skill_dir = tmp.join(".agents").join("skills").join("test-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "Some description\n").unwrap();
+        app.discover_skills();
+        (app, tmp)
+    }
+
+    fn uninstalled_skill_hub_app(fixture: &str) -> (App, PathBuf) {
+        let (mut app, tmp) = skills_app(fixture);
+        let hub = agentry_skills::hub::SkillHub {
+            sources: Vec::new(),
+            skills: std::collections::BTreeMap::from([(
+                "no-src".to_string(),
+                agentry_skills::hub::AvailableSkill {
+                    name: "no-src".to_string(),
+                    source: String::new(),
+                    source_url: String::new(),
+                    skill_path: String::new(),
+                    description: String::new(),
+                    installed: false,
+                    installed_hash: None,
+                    install_path: None,
+                },
+            )]),
+        };
+        app.skill_hub = Some(hub);
+        (app, tmp)
+    }
+
+    #[test]
+    fn skills_insert_on_installed_skill_shows_already_installed() {
+        let (mut app, tmp) = installed_skill_hub_app("installed");
+        app.list_selected = 1;
+        press(&mut app, KeyCode::Char('i'));
+        assert!(app.skill_confirm.is_none());
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("'test-skill' is already installed")
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn skills_insert_confirm_y_executes_without_source() {
+        let (mut app, tmp) = uninstalled_skill_hub_app("confirm-y");
+        app.list_selected = 1;
+        press(&mut app, KeyCode::Char('i'));
+        assert_eq!(
+            app.skill_confirm,
+            Some(SkillConfirmAction::Install("no-src".to_string()))
+        );
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("Install 'no-src'? (y/n)")
+        );
+        press(&mut app, KeyCode::Char('y'));
+        assert!(app.skill_confirm.is_none());
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("No source for 'no-src'")
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn skills_insert_confirm_cancelled_with_n() {
+        let (mut app, tmp) = uninstalled_skill_hub_app("confirm-n");
+        app.list_selected = 1;
+        press(&mut app, KeyCode::Char('i'));
+        assert!(app.skill_confirm.is_some());
+        press(&mut app, KeyCode::Char('n'));
+        assert!(app.skill_confirm.is_none());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn skills_insert_confirm_cancelled_with_esc() {
+        let (mut app, tmp) = uninstalled_skill_hub_app("confirm-esc");
+        app.list_selected = 1;
+        press(&mut app, KeyCode::Char('i'));
+        assert!(app.skill_confirm.is_some());
+        press(&mut app, KeyCode::Esc);
+        assert!(app.skill_confirm.is_none());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn skills_github_sets_open_status_message() {
+        let (mut app, tmp) = skills_app("github-open");
+        let hub = agentry_skills::hub::SkillHub {
+            sources: Vec::new(),
+            skills: std::collections::BTreeMap::from([(
+                "gh-skill".to_string(),
+                agentry_skills::hub::AvailableSkill {
+                    name: "gh-skill".to_string(),
+                    source: "vercel-labs/agent-skills".to_string(),
+                    source_url: "https://github.com/vercel-labs/agent-skills".to_string(),
+                    skill_path: "skills/gh-skill/SKILL.md".to_string(),
+                    description: String::new(),
+                    installed: false,
+                    installed_hash: None,
+                    install_path: None,
+                },
+            )]),
+        };
+        app.skill_hub = Some(hub);
+        app.list_selected = 1;
+        press(&mut app, KeyCode::Char('g'));
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("Open: https://github.com/vercel-labs/agent-skills")
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn skills_github_empty_source_url_no_crash() {
+        let (mut app, tmp) = uninstalled_skill_hub_app("github-empty");
+        app.list_selected = 1;
+        press(&mut app, KeyCode::Char('g'));
+        assert!(app.status_message.is_none());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    fn other_method_agent(install_cmd: &str) -> DetectedAgent {
+        let method = agentry_core::models::InstallMethod::Other {
+            description: "fixture".to_string(),
+            install_cmd: install_cmd.to_string(),
+        };
+        DetectedAgent {
+            spec: agentry_core::models::AgentSpec {
+                id: "fixture".to_string(),
+                name: "fixture".to_string(),
+                cli_binary: "fixture".to_string(),
+                config_dir: ".fixture".to_string(),
+                prompt_filename: "AGENTS.md".to_string(),
+                prompt_format: agentry_core::models::PromptFormat::PlainMd,
+                skills_dir_name: None,
+                max_size: None,
+                install_methods: vec![method.clone()],
+            },
+            installed: false,
+            version: None,
+            config_dir_exists: false,
+            prompt_file_exists: false,
+            skills_dir: None,
+            skills_symlink_pattern: None,
+            installed_skills: Vec::new(),
+            detected_methods: Vec::new(),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn agent_confirm_install_runs_command_and_redetects_in_runtime() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.home_dir = std::env::temp_dir().join("agentry-test-agent-runtime");
+        app.detected_agents = vec![other_method_agent("true")];
+        app.agent_confirm = Some(AgentConfirmAction::Install {
+            agent_id: "fixture".to_string(),
+            method: agentry_core::models::InstallMethod::Other {
+                description: "fixture".to_string(),
+                install_cmd: "true".to_string(),
+            },
+            version: None,
+        });
+        press(&mut app, KeyCode::Char('y'));
+        assert!(app.agent_confirm.is_none());
+        assert_eq!(app.status_message.as_deref(), Some("Installed fixture"));
+        assert!(
+            app.error_message.is_none(),
+            "re-detect must not fail: {:?}",
+            app.error_message
+        );
+        assert!(
+            !app.detected_agents.is_empty(),
+            "re-detect must refresh the agent list"
+        );
+        let _ = std::fs::remove_dir_all(&app.home_dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn invoke_harness_runs_fixture_action_in_runtime_without_panic() {
+        struct NoopHarnessAction;
+        impl agentry_harness::HarnessAction for NoopHarnessAction {
+            fn id(&self) -> &'static str {
+                "test.noop"
+            }
+            fn kind(&self) -> agentry_harness::ActionKind {
+                agentry_harness::ActionKind::Systematic
+            }
+            fn describe(&self, _input: &agentry_harness::ActionInput) -> String {
+                "run test no-op action".to_string()
+            }
+            fn confirmation(
+                &self,
+                _input: &agentry_harness::ActionInput,
+            ) -> agentry_harness::Confirmation {
+                agentry_harness::Confirmation::None
+            }
+            fn execute<'a>(
+                &'a self,
+                _ctx: &'a agentry_harness::HarnessContext,
+                _input: agentry_harness::ActionInput,
+                _ticket: &'a agentry_harness::GateTicket,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<
+                                agentry_harness::ActionOutput,
+                                agentry_harness::HarnessError,
+                            >,
+                        > + Send
+                        + 'a,
+                >,
+            > {
+                Box::pin(async move {
+                    Ok(agentry_harness::ActionOutput::SyncExecuted {
+                        applied: 0,
+                        skipped: 0,
+                    })
+                })
+            }
+        }
+        let mut app = App::new();
+        app.home_dir = std::env::temp_dir().join("agentry-test-harness-runtime");
+        let mut registry = agentry_harness::HarnessRegistry::new();
+        registry.register(Box::new(NoopHarnessAction));
+        app.harness = registry;
+        app.prepare_harness(
+            "test.noop",
+            agentry_harness::ActionInput::SyncExecute {
+                prompt_id: None,
+                mappings: Vec::new(),
+            },
+        );
+        assert!(app.harness_confirm.is_none());
+        assert_eq!(app.status_message.as_deref(), Some("test.noop completed"));
+        assert!(app.error_message.is_none(), "{:?}", app.error_message);
+        let _ = std::fs::remove_dir_all(&app.home_dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rerun_audit_after_fix_runs_in_runtime_without_panic() {
+        let mut app = App::new();
+        app.home_dir = std::env::temp_dir().join("agentry-test-reaudit-runtime");
+        app.audit_report = Some(report_with(Vec::new()));
+        app.rerun_audit_after_fix();
+        assert!(app.audit_loaded);
+        assert!(app.audit_report.is_some());
+        assert!(app.error_message.is_none(), "{:?}", app.error_message);
+        let _ = std::fs::remove_dir_all(&app.home_dir);
+    }
+
+    #[test]
+    fn enter_os_incompatible_method_shows_not_available() {
+        let previous_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", std::env::temp_dir().join("agentry-no-vscode-ext"));
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![DetectedAgent {
+            spec: agentry_core::models::AgentSpec {
+                id: "fixture".to_string(),
+                name: "fixture".to_string(),
+                cli_binary: "fixture".to_string(),
+                config_dir: ".fixture".to_string(),
+                prompt_filename: "AGENTS.md".to_string(),
+                prompt_format: agentry_core::models::PromptFormat::PlainMd,
+                skills_dir_name: None,
+                max_size: None,
+                install_methods: vec![agentry_core::models::InstallMethod::VsCodeExtension {
+                    extension_id: "x.y".to_string(),
+                }],
+            },
+            installed: false,
+            version: None,
+            config_dir_exists: false,
+            prompt_file_exists: false,
+            skills_dir: None,
+            skills_symlink_pattern: None,
+            installed_skills: Vec::new(),
+            detected_methods: Vec::new(),
+        }];
+        press(&mut app, KeyCode::Enter);
+        assert!(app.agent_confirm.is_none());
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("VS Code Ext is not available on this OS")
+        );
+        match previous_home {
+            Some(home) => std::env::set_var("HOME", home),
+            None => std::env::remove_var("HOME"),
+        }
+    }
+
+    #[test]
+    fn update_on_undetected_method_shows_not_installed_via() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![single_method_agent()];
+        press(&mut app, KeyCode::Char('u'));
+        assert!(app.agent_confirm.is_none());
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("Antigravity is not installed via Direct Download")
+        );
+    }
+
+    #[test]
+    fn remove_on_undetected_method_shows_not_installed_via() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![single_method_agent()];
+        press(&mut app, KeyCode::Char('r'));
+        assert!(app.agent_confirm.is_none());
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("Antigravity is not installed via Direct Download")
+        );
+    }
+
+    #[test]
+    fn esc_on_harness_confirm_cancels_with_status() {
+        let mut app = App::new();
+        app.harness_confirm = Some(HarnessPendingInvocation {
+            action_id: "sync.execute".to_string(),
+            input: agentry_harness::ActionInput::SyncExecute {
+                prompt_id: None,
+                mappings: Vec::new(),
+            },
+        });
+        press(&mut app, KeyCode::Esc);
+        assert!(app.harness_confirm.is_none());
+        assert_eq!(app.status_message.as_deref(), Some("Cancelled"));
+    }
+
+    #[test]
+    fn openclaw_create_workspace_not_installed_shows_message() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![openclaw_agent()];
+        app.openclaw_state = Some(OpenClawState {
+            workspaces: Vec::new(),
+            installed: false,
+        });
+        press(&mut app, KeyCode::Char('c'));
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("OpenClaw not installed. Install from https://openclaw.dev")
+        );
+    }
+
+    #[test]
+    fn openclaw_add_agent_not_installed_shows_message() {
+        let mut app = App::new();
+        app.tab_index = 0;
+        app.detected_agents = vec![openclaw_agent()];
+        app.openclaw_state = Some(OpenClawState {
+            workspaces: Vec::new(),
+            installed: false,
+        });
+        press(&mut app, KeyCode::Char('a'));
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("OpenClaw not installed")
+        );
+    }
 }

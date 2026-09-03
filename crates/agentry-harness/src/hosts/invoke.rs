@@ -171,6 +171,21 @@ pub async fn invoke_headless(
     }
 }
 
+pub async fn invoke_headless_suspended(
+    host: &HostProfile,
+    command_template: Option<&str>,
+    model: Option<&str>,
+    prompt: &str,
+    timeout_secs: u64,
+) -> Result<InvokeResult, InvokeError> {
+    let suspended = suspend_terminal();
+    let result = invoke_headless(host, command_template, model, prompt, timeout_secs).await;
+    if suspended {
+        restore_terminal();
+    }
+    result
+}
+
 pub fn with_suspended_terminal<F, T>(f: F) -> T
 where
     F: FnOnce() -> T,

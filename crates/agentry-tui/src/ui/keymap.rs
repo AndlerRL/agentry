@@ -1,5 +1,5 @@
 use ratatui::{
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
 };
 
@@ -251,6 +251,9 @@ pub fn resolve(tab_index: usize, app: &App, key: &str) -> Option<TuiAction> {
 
 pub fn bar_lines(tab_index: usize, app: &App, width: usize) -> Vec<Line<'static>> {
     const NAV_KEYS: [&str; 6] = ["j", "k", "Up", "Down", "Tab", "BackTab"];
+    const GLOBAL_KEYS: [&str; 13] = [
+        "q", "?", "Tab", "BackTab", "j", "k", "Up", "Down", "1", "2", "3", "4", "5",
+    ];
     let owned: Vec<KeyBinding> = bindings_for_tab(tab_index, app)
         .into_iter()
         .filter(|b| b.when.is_none_or(|f| f(app)))
@@ -283,9 +286,20 @@ pub fn bar_lines(tab_index: usize, app: &App, width: usize) -> Vec<Line<'static>
             break;
         }
         used += w;
+        let is_current_tab_key = !GLOBAL_KEYS.contains(&b.key.as_str());
         current.push(Span::styled(
             b.key.clone(),
-            Style::default().fg(Color::Yellow),
+            Style::default()
+                .fg(if is_current_tab_key {
+                    Color::Yellow
+                } else {
+                    Color::DarkGray
+                })
+                .add_modifier(if is_current_tab_key {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
         ));
         current.push(Span::styled(" ", Style::default()));
         current.push(Span::styled(
@@ -313,7 +327,9 @@ fn bar_from_entries(entries: &[(&str, &str)]) -> Vec<Line<'static>> {
     for (key, label) in entries {
         spans.push(Span::styled(
             key.to_string(),
-            Style::default().fg(Color::Yellow),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::styled(" ", Style::default()));
         spans.push(Span::styled(
@@ -656,6 +672,25 @@ mod tests {
         let enter = text.find("Enter Install").expect("Enter");
         assert!(j < k);
         assert!(k < enter);
+    }
+
+    #[test]
+    fn bar_lines_highlight_current_tab_keys() {
+        let app = App::new();
+        let lines = bar_lines(0, &app, 200);
+        let all_spans: Vec<&ratatui::text::Span> = lines.iter().flat_map(|l| &l.spans).collect();
+        for key in ["Enter", "u", "v"] {
+            let span = all_spans
+                .iter()
+                .find(|s| s.content == key)
+                .expect("current-tab key present");
+            assert!(
+                span.style.fg == Some(Color::Yellow)
+                    && span.style.add_modifier.contains(Modifier::BOLD)
+            );
+        }
+        let global = all_spans.iter().find(|s| s.content == "q").expect("q");
+        assert!(global.style.fg != Some(Color::Yellow));
     }
 
     #[test]

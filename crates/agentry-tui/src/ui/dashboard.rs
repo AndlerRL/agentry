@@ -40,7 +40,7 @@ pub fn draw_dashboard(f: &mut Frame, app: &App) {
     let chunks = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(10),
-        Constraint::Length(3),
+        Constraint::Length(5),
         Constraint::Length(2),
     ])
     .split(size);
@@ -157,7 +157,9 @@ fn draw_agents_list_enhanced(f: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = app
         .detected_agents
         .iter()
-        .map(|agent| {
+        .enumerate()
+        .map(|(i, agent)| {
+            let is_selected = app.list_selected == i;
             let status_icon = if agent.installed { "[ON]" } else { "[--]" };
             let status_color = if agent.installed {
                 Color::Green
@@ -176,7 +178,13 @@ fn draw_agents_list_enhanced(f: &mut Frame, app: &App, area: Rect) {
                 ),
                 Span::styled(
                     format!("{:<18}", agent.spec.name),
-                    Style::default().fg(Color::White),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(if is_selected {
+                            Modifier::BOLD
+                        } else {
+                            Modifier::empty()
+                        }),
                 ),
             ];
 
@@ -202,7 +210,11 @@ fn draw_agents_list_enhanced(f: &mut Frame, app: &App, area: Rect) {
             // Version at the end
             spans.push(Span::styled(
                 format!("  v{}", version),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(if is_selected {
+                    Color::Cyan
+                } else {
+                    Color::DarkGray
+                }),
             ));
 
             let line = Line::from(spans);
@@ -598,6 +610,7 @@ fn draw_prompts_list(f: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     let mut items: Vec<ListItem> = Vec::new();
+    let mut list_row = 0usize;
 
     if !global_prompts.is_empty() {
         items.push(ListItem::new(Line::from(Span::styled(
@@ -606,11 +619,28 @@ fn draw_prompts_list(f: &mut Frame, app: &App, area: Rect) {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         ))));
+        list_row += 1;
         for (_orig_idx, prompt) in &global_prompts {
-            items.push(ListItem::new(Line::from(Span::styled(
-                format!("   {}", prompt.name),
-                Style::default().fg(Color::White),
-            ))));
+            let is_selected = app.list_selected == list_row;
+            list_row += 1;
+            items.push(ListItem::new(Line::from(vec![
+                Span::styled("   ", Style::default()),
+                Span::styled(
+                    prompt.name.clone(),
+                    Style::default()
+                        .fg(if is_selected {
+                            Color::Cyan
+                        } else {
+                            Color::White
+                        })
+                        .add_modifier(if is_selected {
+                            Modifier::BOLD
+                        } else {
+                            Modifier::empty()
+                        }),
+                ),
+                Span::styled("  (Global)", Style::default().fg(Color::Green)),
+            ])));
         }
     }
 
@@ -621,7 +651,10 @@ fn draw_prompts_list(f: &mut Frame, app: &App, area: Rect) {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         ))));
+        list_row += 1;
         for (_orig_idx, prompt) in &project_prompts {
+            let is_selected = app.list_selected == list_row;
+            list_row += 1;
             let scope_label = match &prompt.scope {
                 agentry_core::models::PromptScope::Project { root } => {
                     root.file_name().and_then(|n| n.to_str()).unwrap_or("?")
@@ -631,9 +664,22 @@ fn draw_prompts_list(f: &mut Frame, app: &App, area: Rect) {
             items.push(ListItem::new(Line::from(vec![
                 Span::styled(
                     format!("   [{}] ", scope_label),
-                    Style::default().fg(Color::Magenta),
+                    Style::default().fg(Color::Yellow),
                 ),
-                Span::styled(&prompt.name, Style::default().fg(Color::White)),
+                Span::styled(
+                    &prompt.name,
+                    Style::default()
+                        .fg(if is_selected {
+                            Color::Cyan
+                        } else {
+                            Color::White
+                        })
+                        .add_modifier(if is_selected {
+                            Modifier::BOLD
+                        } else {
+                            Modifier::empty()
+                        }),
+                ),
             ])));
         }
     }
@@ -772,17 +818,17 @@ fn draw_prompt_detail(f: &mut Frame, app: &App, area: Rect) {
 
             detail_lines.push(Line::from(""));
             detail_lines.push(Line::from(Span::styled(
-                " ── Preview ──────────────────────────",
-                Style::default().fg(Color::DarkGray),
+                " ── Content preview ────────────────────",
+                Style::default().fg(Color::Cyan),
             )));
 
-            for line in prompt.body.lines().take(20) {
+            for line in prompt.body.lines().take(15) {
                 detail_lines.push(Line::from(Span::styled(
                     format!(
                         " {}",
                         truncate_to_width(line, detail_width.saturating_sub(1))
                     ),
-                    Style::default().fg(Color::White),
+                    Style::default().fg(Color::DarkGray),
                 )));
             }
 
@@ -881,10 +927,15 @@ fn draw_skills_list(f: &mut Frame, app: &App, area: Rect) {
                 let status_color = if skill.installed {
                     Color::Green
                 } else {
-                    Color::DarkGray
+                    Color::Red
                 };
                 items.push(ListItem::new(Line::from(vec![
-                    Span::styled(format!("  {} ", status), Style::default().fg(status_color)),
+                    Span::styled(
+                        format!("  {} ", status),
+                        Style::default()
+                            .fg(status_color)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(&skill.name, Style::default().fg(Color::White)),
                 ])));
             }
@@ -1033,6 +1084,41 @@ fn draw_skill_detail(f: &mut Frame, app: &App, area: Rect) {
 
         detail_lines.push(Line::from(""));
         detail_lines.push(Line::from(Span::styled(
+            " ── Content preview ────────────────────",
+            Style::default().fg(Color::Cyan),
+        )));
+
+        let skill_md_path = skill
+            .install_path
+            .as_ref()
+            .map(|dir| dir.join("SKILL.md"))
+            .filter(|p| p.is_file());
+        match skill_md_path {
+            Some(path) => match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    for line in content.lines().take(15) {
+                        detail_lines.push(Line::from(Span::styled(
+                            format!(
+                                " {}",
+                                truncate_to_width(line, detail_width.saturating_sub(1))
+                            ),
+                            Style::default().fg(Color::DarkGray),
+                        )));
+                    }
+                }
+                Err(_) => detail_lines.push(Line::from(Span::styled(
+                    "  No SKILL.md found",
+                    Style::default().fg(Color::DarkGray),
+                ))),
+            },
+            None => detail_lines.push(Line::from(Span::styled(
+                "  No SKILL.md found",
+                Style::default().fg(Color::DarkGray),
+            ))),
+        }
+
+        detail_lines.push(Line::from(""));
+        detail_lines.push(Line::from(Span::styled(
             " ── Actions ──────────────────────────",
             Style::default().fg(Color::DarkGray),
         )));
@@ -1104,8 +1190,8 @@ fn draw_sync_list(f: &mut Frame, app: &App, area: Rect) {
                 let (status_icon, status_color) = match mapping.status {
                     agentry_core::models::SyncStatus::UpToDate => ("✓", Color::Green),
                     agentry_core::models::SyncStatus::Missing => ("?", Color::Yellow),
-                    agentry_core::models::SyncStatus::Outdated => ("↑", Color::Yellow),
-                    agentry_core::models::SyncStatus::Conflict => ("!", Color::Red),
+                    agentry_core::models::SyncStatus::Outdated => ("↑", Color::Red),
+                    agentry_core::models::SyncStatus::Conflict => ("!", Color::Magenta),
                 };
                 let truncated_dest =
                     truncate_to_width(&mapping.destination, area.width.saturating_sub(33));
@@ -1200,8 +1286,8 @@ fn draw_sync_detail(f: &mut Frame, app: &App, area: Rect) {
             let (status_icon, status_color) = match entry.status {
                 agentry_core::models::SyncStatus::UpToDate => ("Up to date ✓", Color::Green),
                 agentry_core::models::SyncStatus::Missing => ("Missing ?", Color::Yellow),
-                agentry_core::models::SyncStatus::Outdated => ("Outdated ↑", Color::Yellow),
-                agentry_core::models::SyncStatus::Conflict => ("Conflict !", Color::Red),
+                agentry_core::models::SyncStatus::Outdated => ("Outdated ↑", Color::Red),
+                agentry_core::models::SyncStatus::Conflict => ("Conflict !", Color::Magenta),
             };
 
             let action_label = match entry.action {
@@ -1211,7 +1297,7 @@ fn draw_sync_detail(f: &mut Frame, app: &App, area: Rect) {
                 agentry_core::models::SyncAction::Skip => "Skip",
             };
 
-            vec![
+            let mut detail_lines = vec![
                 Line::from(Span::styled(
                     format!(" {} → {} ", entry.prompt_name, entry.agent_id),
                     Style::default()
@@ -1247,14 +1333,49 @@ fn draw_sync_detail(f: &mut Frame, app: &App, area: Rect) {
                 ]),
                 Line::from(""),
                 Line::from(Span::styled(
-                    " ── Actions ──────────────────────────",
+                    " ── Content preview ────────────────────",
+                    Style::default().fg(Color::Cyan),
+                )),
+            ];
+
+            let dest_path = std::path::Path::new(&entry.destination);
+            let preview_lines: Vec<Line> = if dest_path.is_file() {
+                match std::fs::read_to_string(dest_path) {
+                    Ok(content) => content
+                        .lines()
+                        .take(15)
+                        .map(|line| {
+                            Line::from(Span::styled(
+                                format!(
+                                    " {}",
+                                    truncate_to_width(line, detail_width.saturating_sub(1))
+                                ),
+                                Style::default().fg(Color::DarkGray),
+                            ))
+                        })
+                        .collect(),
+                    Err(_) => vec![Line::from(Span::styled(
+                        "  Destination file missing",
+                        Style::default().fg(Color::DarkGray),
+                    ))],
+                }
+            } else {
+                vec![Line::from(Span::styled(
+                    "  Destination file missing",
                     Style::default().fg(Color::DarkGray),
-                )),
-                Line::from(Span::styled(
-                    "  s: execute selected · S: execute all · Enter: execute selected",
-                    Style::default().fg(Color::Yellow),
-                )),
-            ]
+                ))]
+            };
+            detail_lines.extend(preview_lines);
+            detail_lines.push(Line::from(""));
+            detail_lines.push(Line::from(Span::styled(
+                " ── Actions ──────────────────────────",
+                Style::default().fg(Color::DarkGray),
+            )));
+            detail_lines.push(Line::from(Span::styled(
+                "  s: execute selected · S: execute all · Enter: execute selected",
+                Style::default().fg(Color::Yellow),
+            )));
+            detail_lines
         } else {
             vec![
                 Line::from(""),
@@ -1316,6 +1437,31 @@ fn severity_label(severity: Severity) -> &'static str {
         Severity::Info => "Info",
         Severity::Suggestion => "Suggestion",
     }
+}
+
+fn audit_preview_path(finding: &agentry_audit::report::AuditFinding) -> Option<std::path::PathBuf> {
+    let mut paths: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(evidence) = finding.evidence.as_deref() {
+        for token in evidence.split_whitespace() {
+            for prefix in ["path=", "symlink=", "install_path="] {
+                if let Some(value) = token.strip_prefix(prefix) {
+                    paths.push(std::path::PathBuf::from(value));
+                }
+            }
+        }
+    }
+    if let Some(fix) = finding.fix.as_ref().or(finding.suggested_fix.as_ref()) {
+        let path = match fix {
+            agentry_audit::report::FixAction::FileWrite { path, .. }
+            | agentry_audit::report::FixAction::FileRemove { path }
+            | agentry_audit::report::FixAction::SymlinkRecreate { path, .. } => Some(path.clone()),
+            _ => None,
+        };
+        if let Some(path) = path {
+            paths.push(path);
+        }
+    }
+    paths.into_iter().find(|p| p.is_file())
 }
 
 fn severity_color(severity: Severity) -> Color {
@@ -1475,9 +1621,16 @@ fn draw_audit_list(f: &mut Frame, app: &App, area: Rect) {
                 "   [{}] {}{} — {}",
                 agent, badge, finding.check_id, finding.message
             );
+            let row_index = items.len();
             items.push(ListItem::new(Line::from(Span::styled(
                 truncate_to_width(&row, list_width),
-                Style::default().fg(Color::White),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(if app.list_selected == row_index {
+                        Modifier::BOLD
+                    } else {
+                        Modifier::empty()
+                    }),
             ))));
         }
     }
@@ -1561,14 +1714,44 @@ fn draw_audit_detail(f: &mut Frame, app: &App, area: Rect) {
                 " ── Evidence ─────────────────────────",
                 Style::default().fg(Color::DarkGray),
             )));
-            for line in evidence.lines().take(10) {
-                detail_lines.push(Line::from(Span::styled(
-                    format!(
-                        " {}",
-                        truncate_to_width(line, detail_width.saturating_sub(1))
+
+            let preview_content =
+                audit_preview_path(finding).and_then(|p| match std::fs::read_to_string(&p) {
+                    Ok(content) => Some((p, content)),
+                    Err(_) => None,
+                });
+            if let Some((preview_path, content)) = preview_content {
+                detail_lines.push(Line::from(vec![
+                    Span::styled("  File: ", Style::default().fg(Color::Yellow)),
+                    Span::styled(
+                        truncate_to_width(&preview_path.display().to_string(), detail_width),
+                        Style::default().fg(Color::DarkGray),
                     ),
-                    Style::default().fg(Color::DarkGray),
+                ]));
+                detail_lines.push(Line::from(""));
+                detail_lines.push(Line::from(Span::styled(
+                    " ── Content preview ────────────────────",
+                    Style::default().fg(Color::Cyan),
                 )));
+                for line in content.lines().take(10) {
+                    detail_lines.push(Line::from(Span::styled(
+                        format!(
+                            " {}",
+                            truncate_to_width(line, detail_width.saturating_sub(1))
+                        ),
+                        Style::default().fg(Color::DarkGray),
+                    )));
+                }
+            } else {
+                for line in evidence.lines().take(10) {
+                    detail_lines.push(Line::from(Span::styled(
+                        format!(
+                            " {}",
+                            truncate_to_width(line, detail_width.saturating_sub(1))
+                        ),
+                        Style::default().fg(Color::DarkGray),
+                    )));
+                }
             }
         }
 
@@ -1811,7 +1994,7 @@ mod tests {
     }
 
     #[test]
-    fn dashboard_status_region_sits_above_keymap_and_height_three() {
+    fn dashboard_status_region_sits_above_keymap_and_height_five() {
         let mut app = App::new();
         app.status_message = Some("status payload".into());
         let backend = ratatui::backend::TestBackend::new(80, 30);
@@ -1824,10 +2007,254 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("")
         };
-        assert!(row_text(25).contains("Message"));
-        assert!(row_text(26).contains("status payload"));
+        assert!(row_text(23).contains("Message"));
+        assert!(row_text(24).contains("status payload"));
         assert!(row_text(27).trim().contains("└") || row_text(27).trim().is_empty());
         assert!(row_text(29).contains("Quit"));
+    }
+
+    #[test]
+    fn audit_list_renders_ai_badge_for_audited_findings() {
+        use agentry_audit::report::{
+            AgentAudit, AuditReport, AuditSummary, FindingCategory, HealthGrade, Severity,
+        };
+        fn finding(
+            category: FindingCategory,
+            check_id: &str,
+        ) -> agentry_audit::report::AuditFinding {
+            agentry_audit::report::AuditFinding {
+                check_id: check_id.to_string(),
+                severity: Severity::Info,
+                category,
+                agent_id: None,
+                message: "msg".to_string(),
+                remediation: "fix".to_string(),
+                auto_fixable: false,
+                fix: None,
+                suggested_fix: None,
+                evidence: None,
+            }
+        }
+        let detected = agentry_core::models::DetectedAgent {
+            spec: agentry_core::models::AgentSpec {
+                id: "codex".to_string(),
+                name: "codex".to_string(),
+                cli_binary: "codex".to_string(),
+                config_dir: ".codex".to_string(),
+                prompt_filename: "AGENTS.md".to_string(),
+                prompt_format: agentry_core::models::PromptFormat::PlainMd,
+                skills_dir_name: None,
+                max_size: None,
+                install_methods: Vec::new(),
+            },
+            installed: true,
+            version: None,
+            config_dir_exists: true,
+            prompt_file_exists: true,
+            skills_dir: None,
+            skills_symlink_pattern: None,
+            installed_skills: Vec::new(),
+            detected_methods: Vec::new(),
+        };
+        let report = AuditReport {
+            generated_at: chrono::Utc::now(),
+            machine_id: "m".to_string(),
+            agents: vec![AgentAudit {
+                agent_id: "codex".to_string(),
+                health_score: 100,
+                grade: HealthGrade::Healthy,
+                detected,
+                findings: vec![
+                    finding(FindingCategory::Audited, "auditor.one"),
+                    finding(FindingCategory::Installation, "inst.one"),
+                ],
+            }],
+            global_findings: Vec::new(),
+            summary: AuditSummary {
+                total_findings: 2,
+                by_severity: std::collections::BTreeMap::new(),
+                by_category: std::collections::BTreeMap::new(),
+                auto_fixable_count: 0,
+                healthy_agents: 1,
+                degraded_agents: 0,
+            },
+            schema_version: 2,
+        };
+        let mut app = App::new();
+        app.tab_index = 4;
+        app.audit_report = Some(report);
+        let rendered = render_dashboard_to_string(&app, 200, 30);
+        assert!(
+            rendered.contains("[AI] auditor.one"),
+            "audited finding must render the [AI] badge"
+        );
+        assert!(
+            !rendered.contains("[AI] inst.one"),
+            "non-audited finding must not render the [AI] badge"
+        );
+    }
+
+    #[test]
+    fn prompt_detail_shows_content_preview_first_line() {
+        let mut app = App::new();
+        app.tab_index = 1;
+        app.prompts = vec![agentry_core::models::UnifiedPrompt {
+            id: "p1".into(),
+            name: "test-prompt".into(),
+            description: String::new(),
+            frontmatter: Default::default(),
+            body: "# Test Prompt\nsecond line of the body\nthird line".into(),
+            xml_tags: Vec::new(),
+            scope: agentry_core::models::PromptScope::Global,
+            source_format: agentry_core::models::PromptFormat::PlainMd,
+            source_path: None,
+        }];
+        app.list_selected = 1;
+        let rendered = render_dashboard_to_string(&app, 120, 30);
+        assert!(rendered.contains("Content preview"));
+        assert!(rendered.contains("second line of the body"));
+    }
+
+    #[test]
+    fn skill_detail_shows_skill_md_preview_first_line() {
+        let tmp = std::env::temp_dir().join(format!("agentry_tui_skill_pv_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(tmp.join("SKILL.md"), "# Demo Skill\ndemo body line\nthird").unwrap();
+
+        let mut app = App::new();
+        app.tab_index = 2;
+        let mut skills = std::collections::BTreeMap::new();
+        skills.insert(
+            "demo-skill".to_string(),
+            agentry_skills::hub::AvailableSkill {
+                name: "demo-skill".into(),
+                source: "test-source".into(),
+                source_url: String::new(),
+                skill_path: "skills/demo-skill/SKILL.md".into(),
+                description: "demo".into(),
+                installed: true,
+                installed_hash: None,
+                install_path: Some(tmp.clone()),
+            },
+        );
+        app.skill_hub = Some(agentry_skills::hub::SkillHub {
+            sources: Vec::new(),
+            skills,
+        });
+        app.list_selected = 1;
+        let rendered = render_dashboard_to_string(&app, 120, 30);
+        assert!(rendered.contains("Content preview"));
+        assert!(rendered.contains("demo body line"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn sync_detail_shows_destination_preview() {
+        let tmp = std::env::temp_dir().join(format!("agentry_tui_sync_pv_{}", std::process::id()));
+        let dest = tmp.join("CLAUDE.md");
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(&dest, "# Sync Destination\ndestination body line\nthird").unwrap();
+
+        let mut app = App::new();
+        app.tab_index = 3;
+        app.sync_loaded = true;
+        app.sync_results = vec![crate::app::SyncResultEntry {
+            prompt_name: "GEMINI".into(),
+            agent_id: "claude-code".into(),
+            destination: dest.display().to_string(),
+            status: agentry_core::models::SyncStatus::Missing,
+            action: agentry_core::models::SyncAction::Copy,
+            mapping: agentry_core::models::SyncMapping {
+                prompt_id: "GEMINI".into(),
+                agent_id: "claude-code".into(),
+                destination: dest.clone(),
+                target_format: agentry_core::models::PromptFormat::PlainMd,
+                action: agentry_core::models::SyncAction::Copy,
+                status: agentry_core::models::SyncStatus::Missing,
+            },
+        }];
+        app.list_selected = 1;
+        let rendered = render_dashboard_to_string(&app, 120, 30);
+        assert!(rendered.contains("Content preview"));
+        assert!(rendered.contains("destination body line"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn audit_detail_shows_evidence_file_preview() {
+        use agentry_audit::report::{
+            AgentAudit, AuditFinding, AuditReport, FindingCategory, HealthGrade, Severity,
+        };
+
+        let tmp = std::env::temp_dir().join(format!("agentry_tui_audit_pv_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let file = tmp.join("CLAUDE.md");
+        std::fs::write(&file, "# Evidence File\nevidence body line\nthird").unwrap();
+
+        let mut app = App::new();
+        app.tab_index = 4;
+        app.audit_report = Some(AuditReport {
+            generated_at: chrono::Utc::now(),
+            machine_id: "m".into(),
+            agents: vec![AgentAudit {
+                agent_id: "codex".into(),
+                health_score: 100,
+                grade: HealthGrade::Healthy,
+                detected: agentry_core::models::DetectedAgent {
+                    spec: agentry_core::models::AgentSpec {
+                        id: "codex".into(),
+                        name: "codex".into(),
+                        cli_binary: "codex".into(),
+                        config_dir: ".codex".into(),
+                        prompt_filename: "AGENTS.md".into(),
+                        prompt_format: agentry_core::models::PromptFormat::PlainMd,
+                        skills_dir_name: None,
+                        max_size: None,
+                        install_methods: Vec::new(),
+                    },
+                    installed: true,
+                    version: None,
+                    config_dir_exists: true,
+                    prompt_file_exists: true,
+                    skills_dir: None,
+                    skills_symlink_pattern: None,
+                    installed_skills: Vec::new(),
+                    detected_methods: Vec::new(),
+                },
+                findings: vec![AuditFinding {
+                    check_id: "test.check".into(),
+                    severity: Severity::Warning,
+                    category: FindingCategory::PromptFile,
+                    agent_id: Some("codex".into()),
+                    message: "test message".into(),
+                    remediation: "fix it".into(),
+                    auto_fixable: false,
+                    fix: None,
+                    suggested_fix: None,
+                    evidence: Some(format!("path={} size=3", file.display())),
+                }],
+            }],
+            global_findings: Vec::new(),
+            summary: agentry_audit::report::AuditSummary {
+                total_findings: 1,
+                by_severity: std::collections::BTreeMap::new(),
+                by_category: std::collections::BTreeMap::new(),
+                auto_fixable_count: 0,
+                healthy_agents: 0,
+                degraded_agents: 0,
+            },
+            schema_version: 2,
+        });
+        app.list_selected = 1;
+        let rendered = render_dashboard_to_string(&app, 140, 30);
+        assert!(rendered.contains("Content preview"));
+        assert!(rendered.contains("evidence body line"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

@@ -51,6 +51,13 @@ const ASCII_ART: &[&str] = &[
     "████████████████████████████████████████████████████████████████████████████████████████████"
 ];
 
+fn version_line() -> String {
+    format!(
+        "        v{}  │  Press any key to continue",
+        env!("CARGO_PKG_VERSION")
+    )
+}
+
 pub fn draw_intro(f: &mut Frame, app: &App) {
     let size = f.area();
     let block = Block::default()
@@ -119,10 +126,7 @@ pub fn draw_intro(f: &mut Frame, app: &App) {
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        format!(
-            "        v{}  │  Press any key to continue",
-            env!("CARGO_PKG_VERSION")
-        ),
+        version_line(),
         Style::default().fg(Color::DarkGray),
     )));
 
@@ -158,5 +162,23 @@ mod tests {
         assert_ne!(second, third);
         assert_eq!(brand_phrase_for_elapsed(100), first);
         assert_eq!(brand_phrase_for_elapsed(90), brand_phrase_for_elapsed(99));
+    }
+
+    #[test]
+    fn version_line_contains_cargo_pkg_version() {
+        assert!(version_line().contains(env!("CARGO_PKG_VERSION")));
+    }
+
+    #[test]
+    fn version_line_has_no_hardcoded_literal() {
+        let line = version_line();
+        assert!(
+            !line.contains("v0.1.0"),
+            "version must come from CARGO_PKG_VERSION, not a hardcoded literal: {line}"
+        );
+        assert!(
+            !line.contains("0.1.0"),
+            "version must come from CARGO_PKG_VERSION, not a hardcoded literal: {line}"
+        );
     }
 }

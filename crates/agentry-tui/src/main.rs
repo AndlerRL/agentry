@@ -1140,4 +1140,58 @@ mod tests {
             "0 of 0 fixes applied; 0 findings remain (was 0)"
         );
     }
+
+    #[test]
+    fn detect_parses_without_version_flag_required() {
+        let cli = match Cli::try_parse_from(["agentry", "detect"]) {
+            Ok(cli) => cli,
+            Err(e) => panic!("detect must parse: {e}"),
+        };
+        assert!(matches!(cli.command, Some(Commands::Detect)));
+    }
+
+    #[test]
+    fn audit_json_parses_without_version_flag_required() {
+        let cli = match Cli::try_parse_from(["agentry", "audit", "--json"]) {
+            Ok(cli) => cli,
+            Err(e) => panic!("audit --json must parse: {e}"),
+        };
+        match cli.command {
+            Some(Commands::Audit { json, .. }) => assert!(json),
+            _ => panic!("expected Audit command"),
+        }
+    }
+
+    #[test]
+    fn setup_dry_run_parses_without_version_flag_required() {
+        let cli = match Cli::try_parse_from(["agentry", "setup", "--dry-run"]) {
+            Ok(cli) => cli,
+            Err(e) => panic!("setup --dry-run must parse: {e}"),
+        };
+        match cli.command {
+            Some(Commands::Setup { dry_run, .. }) => assert!(dry_run),
+            _ => panic!("expected Setup command"),
+        }
+    }
+
+    #[test]
+    fn dash_v_triggers_version_action_not_required_error() {
+        match Cli::try_parse_from(["agentry", "-v"]) {
+            Ok(_) => panic!("-v must not parse as Ok"),
+            Err(e) => assert_eq!(
+                e.kind(),
+                clap::error::ErrorKind::DisplayVersion,
+                "-v must trigger the clap version action, not a required-argument error: {e}"
+            ),
+        }
+    }
+
+    #[test]
+    fn no_args_parses_to_tui() {
+        let cli = match Cli::try_parse_from(["agentry"]) {
+            Ok(cli) => cli,
+            Err(e) => panic!("bare invocation must parse: {e}"),
+        };
+        assert!(cli.command.is_none());
+    }
 }

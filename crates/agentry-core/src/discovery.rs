@@ -181,10 +181,11 @@ pub fn delete_prompt(home_dir: &Path, name: &str) -> anyhow::Result<()> {
     let canonical_dir = home_dir.join(".agents").join("prompts");
     let path = canonical_dir.join(format!("{}.md", name));
 
-    if path.exists() {
-        std::fs::remove_file(&path)?;
+    if !path.exists() {
+        anyhow::bail!("prompt '{name}' not found at {}", path.display());
     }
 
+    std::fs::remove_file(&path)?;
     Ok(())
 }
 
@@ -303,5 +304,24 @@ mod tests {
             ),
             PromptFormat::Mdc
         );
+    }
+
+    #[test]
+    fn test_delete_prompt_removes_file() {
+        let tmp = TempDir::new("agentry_test_delete_prompt_remove");
+        let canonical_dir = tmp.path().join(".agents").join("prompts");
+        std::fs::create_dir_all(&canonical_dir).unwrap();
+        let path = canonical_dir.join("alpha.md");
+        std::fs::write(&path, "# alpha").unwrap();
+
+        delete_prompt(tmp.path(), "alpha").unwrap();
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn test_delete_prompt_errors_on_missing() {
+        let tmp = TempDir::new("agentry_test_delete_prompt_missing");
+        let err = delete_prompt(tmp.path(), "never-existed").unwrap_err();
+        assert!(err.to_string().contains("never-existed"));
     }
 }
