@@ -8,6 +8,23 @@ use ratatui::{
 
 use crate::app::App;
 
+const BRAND_PHRASES: &[&str] = &[
+    "One prompt to rule them all — synced to 11 agents",
+    "Your agents' prompts, finally on the same page",
+    "Audit your agents before they audit you",
+    "The multi-agent prompt manager that actually manages",
+    "Write once, sync everywhere, sleep better",
+    "11 agent CLIs, one canonical truth",
+    "Prompts drift. agentry doesn't.",
+    "The TUI that keeps your agents in line",
+    "From chaos to canonical in one keystroke",
+    "Canonical prompts, obedient agents",
+];
+
+fn brand_phrase_for_elapsed(elapsed_secs: u64) -> &'static str {
+    BRAND_PHRASES[((elapsed_secs / 10) as usize) % BRAND_PHRASES.len()]
+}
+
 const ASCII_ART: &[&str] = &[
     "████████████████████████████████████████████████████████████████████████████████████████████",
     "█▌                                                                                        ▐█",
@@ -102,8 +119,19 @@ pub fn draw_intro(f: &mut Frame, app: &App) {
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "        v0.1.0  │  Press any key to continue",
+        format!(
+            "        v{}  │  Press any key to continue",
+            env!("CARGO_PKG_VERSION")
+        ),
         Style::default().fg(Color::DarkGray),
+    )));
+
+    lines.push(Line::from(Span::styled(
+        format!(
+            "        \"{}\"",
+            brand_phrase_for_elapsed(app.intro_started_at.elapsed().as_secs())
+        ),
+        Style::default().fg(Color::Cyan),
     )));
 
     // Help hint
@@ -114,4 +142,21 @@ pub fn draw_intro(f: &mut Frame, app: &App) {
 
     let paragraph = Paragraph::new(lines).alignment(Alignment::Center);
     f.render_widget(paragraph, inner);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn brand_phrase_cycles_with_elapsed_time() {
+        assert_eq!(BRAND_PHRASES.len(), 10);
+        let first = brand_phrase_for_elapsed(0);
+        let second = brand_phrase_for_elapsed(10);
+        let third = brand_phrase_for_elapsed(20);
+        assert_ne!(first, second);
+        assert_ne!(second, third);
+        assert_eq!(brand_phrase_for_elapsed(100), first);
+        assert_eq!(brand_phrase_for_elapsed(90), brand_phrase_for_elapsed(99));
+    }
 }

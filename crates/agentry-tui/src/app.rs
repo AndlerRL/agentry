@@ -55,6 +55,8 @@ pub struct App {
     pub home_dir: PathBuf,
     /// Intro animation progress (0.0 → 1.0)
     pub intro_progress: f32,
+    /// Intro start timestamp (for rotating brand phrases)
+    pub intro_started_at: std::time::Instant,
     /// Intro animation: show "press any key"
     pub intro_ready: bool,
     /// Spinner state
@@ -192,6 +194,7 @@ impl App {
             delete_confirm: None,
             home_dir,
             intro_progress: 0.0,
+            intro_started_at: std::time::Instant::now(),
             intro_ready: false,
             spinner_frame: 0,
             should_quit: false,

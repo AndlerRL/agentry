@@ -6,11 +6,19 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "agentry", version, about = "Multi-Agent Prompt Manager")]
+#[command(
+    name = "agentry",
+    version,
+    disable_version_flag = true,
+    about = "Multi-Agent Prompt Manager"
+)]
 #[command(long_about = "agentry — The Multi-Agent Prompt Manager\n\n\
 Unified prompt management for Claude Code, Continue, OpenClaw, Codex, Gemini CLI, \
-Amp, OpenCode, Firebender, DeepAgents, Antigravity, and Warp.")]
+Amp, OpenCode, Firebender, DeepAgents, Antigravity, and Warp.\n\n\
+First run? Try `agentry setup` for guided onboarding.")]
 struct Cli {
+    #[arg(short = 'v', long = "version", visible_short_alias = 'V', action = clap::ArgAction::Version)]
+    version_flag: bool,
     #[command(subcommand)]
     command: Option<Commands>,
 }

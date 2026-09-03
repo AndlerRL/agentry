@@ -40,7 +40,7 @@ pub fn draw_dashboard(f: &mut Frame, app: &App) {
     let chunks = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(10),
-        Constraint::Length(1),
+        Constraint::Length(3),
         Constraint::Length(2),
     ])
     .split(size);
@@ -97,15 +97,38 @@ pub fn draw_dashboard(f: &mut Frame, app: &App) {
     } else {
         app.status_message.as_deref().unwrap_or("")
     };
-    let status_color = if app.error_message.is_some() {
+    let is_error = app.error_message.is_some();
+    let status_color = Color::Yellow;
+    let status_bg = if is_error {
         Color::Red
     } else {
         Color::DarkGray
     };
+    let status_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(if is_error {
+            Color::Red
+        } else {
+            Color::DarkGray
+        }))
+        .title(if is_error { " Error " } else { " Message " })
+        .title_style(
+            Style::default()
+                .fg(status_color)
+                .add_modifier(Modifier::BOLD),
+        );
     let status_bar = Paragraph::new(Line::from(Span::styled(
         format!(" {}", status),
-        Style::default().fg(status_color),
-    )));
+        Style::default()
+            .fg(status_color)
+            .bg(status_bg)
+            .add_modifier(if is_error {
+                Modifier::BOLD
+            } else {
+                Modifier::empty()
+            }),
+    )))
+    .block(status_block);
     f.render_widget(status_bar, chunks[2]);
 
     f.render_widget(ratatui::widgets::Clear, chunks[3]);
@@ -1084,6 +1107,8 @@ fn draw_sync_list(f: &mut Frame, app: &App, area: Rect) {
                     agentry_core::models::SyncStatus::Outdated => ("↑", Color::Yellow),
                     agentry_core::models::SyncStatus::Conflict => ("!", Color::Red),
                 };
+                let truncated_dest =
+                    truncate_to_width(&mapping.destination, area.width.saturating_sub(33));
                 items.push(ListItem::new(Line::from(vec![
                     Span::styled(
                         format!("  {} ", status_icon),
@@ -1094,8 +1119,18 @@ fn draw_sync_list(f: &mut Frame, app: &App, area: Rect) {
                         Style::default().fg(Color::White),
                     ),
                     Span::styled(
-                        format!(" {}", mapping.status),
+                        format!(" {} ", mapping.status),
                         Style::default().fg(status_color),
+                    ),
+                    Span::styled(
+                        "→",
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!(" {}", truncated_dest),
+                        Style::default().fg(Color::DarkGray),
                     ),
                 ])));
             }
@@ -1185,6 +1220,17 @@ fn draw_sync_detail(f: &mut Frame, app: &App, area: Rect) {
                 )),
                 Line::from(""),
                 Line::from(vec![
+                    Span::styled("  Prompt:     ", Style::default().fg(Color::Yellow)),
+                    Span::styled(
+                        truncate_to_width(&entry.prompt_name, detail_width),
+                        Style::default().fg(Color::White),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::styled("  Agent:      ", Style::default().fg(Color::Yellow)),
+                    Span::styled(&entry.agent_id, Style::default().fg(Color::White)),
+                ]),
+                Line::from(vec![
                     Span::styled("  Status:     ", Style::default().fg(Color::Yellow)),
                     Span::styled(status_icon.to_string(), Style::default().fg(status_color)),
                 ]),
@@ -1193,7 +1239,7 @@ fn draw_sync_detail(f: &mut Frame, app: &App, area: Rect) {
                     Span::styled(action_label, Style::default().fg(Color::White)),
                 ]),
                 Line::from(vec![
-                    Span::styled("  Target:     ", Style::default().fg(Color::Yellow)),
+                    Span::styled("  Destination:", Style::default().fg(Color::Yellow)),
                     Span::styled(
                         truncate_to_width(&entry.destination, detail_width),
                         Style::default().fg(Color::DarkGray),
@@ -1744,5 +1790,75 @@ mod tests {
         assert!(row_text(22).contains("·") || row_text(22).trim().is_empty());
         assert!(row_text(23).contains("·"));
         assert!(row_text(23).contains("Quit"));
+    }
+
+    #[test]
+    fn dashboard_status_region_is_bordered_and_titled() {
+        let mut app = App::new();
+        app.status_message = Some("Hello from the status box".into());
+        let rendered = render_dashboard_to_string(&app, 120, 30);
+        assert!(rendered.contains("Message"));
+        assert!(rendered.contains("Hello from the status box"));
+    }
+
+    #[test]
+    fn dashboard_error_region_is_titled_error() {
+        let mut app = App::new();
+        app.error_message = Some("Something broke".into());
+        let rendered = render_dashboard_to_string(&app, 120, 30);
+        assert!(rendered.contains("Error"));
+        assert!(rendered.contains("Something broke"));
+    }
+
+    #[test]
+    fn dashboard_status_region_sits_above_keymap_and_height_three() {
+        let mut app = App::new();
+        app.status_message = Some("status payload".into());
+        let backend = ratatui::backend::TestBackend::new(80, 30);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw_dashboard(f, &app)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let row_text = |y: u16| -> String {
+            (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<Vec<_>>()
+                .join("")
+        };
+        assert!(row_text(25).contains("Message"));
+        assert!(row_text(26).contains("status payload"));
+        assert!(row_text(27).trim().contains("└") || row_text(27).trim().is_empty());
+        assert!(row_text(29).contains("Quit"));
+    }
+
+    #[test]
+    fn sync_list_shows_prompt_arrow_destination() {
+        let mut app = App::new();
+        app.tab_index = 3;
+        app.sync_loaded = true;
+        app.sync_results = vec![crate::app::SyncResultEntry {
+            prompt_name: "GEMINI".into(),
+            agent_id: "claude-code".into(),
+            destination: "/home/u/.claude/CLAUDE.md".into(),
+            status: agentry_core::models::SyncStatus::Missing,
+            action: agentry_core::models::SyncAction::Copy,
+            mapping: agentry_core::models::SyncMapping {
+                prompt_id: "GEMINI".into(),
+                agent_id: "claude-code".into(),
+                destination: "/home/u/.claude/CLAUDE.md".into(),
+                target_format: agentry_core::models::PromptFormat::PlainMd,
+                action: agentry_core::models::SyncAction::Copy,
+                status: agentry_core::models::SyncStatus::Missing,
+            },
+        }];
+        app.list_selected = 1;
+        let rendered = render_dashboard_to_string(&app, 120, 30);
+        assert!(rendered.contains("claude-code"));
+        assert!(rendered.contains("CLAUDE.md"));
+        assert!(rendered.contains("→"));
+        assert!(rendered.contains("Destination:"));
+        assert!(rendered.contains("Prompt:"));
+        assert!(rendered.contains("Agent:"));
+        assert!(rendered.contains("Missing"));
+        assert!(rendered.contains("Copy"));
     }
 }
