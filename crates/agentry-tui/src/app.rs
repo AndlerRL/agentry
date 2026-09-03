@@ -2018,6 +2018,28 @@ mod tests {
     };
     use agentry_core::models::DetectedAgent;
 
+    struct EnvGuard {
+        key: &'static str,
+        prev: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, val: &str) -> Self {
+            let prev = std::env::var_os(key);
+            std::env::set_var(key, val);
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
     fn finding(severity: Severity, check_id: &str) -> AuditFinding {
         AuditFinding {
             check_id: check_id.to_string(),
@@ -3437,7 +3459,7 @@ mod tests {
     #[test]
     fn prompts_new_typing_enter_creates_template_file() {
         let (mut app, tmp) = prompts_app("new", "alpha");
-        std::env::set_var("EDITOR", "true");
+        let _guard = EnvGuard::set("EDITOR", "true");
         press(&mut app, KeyCode::Char('n'));
         assert_eq!(app.new_prompt_name, Some(String::new()));
         for c in ['b', 'e', 't', 'a'] {
@@ -3454,7 +3476,6 @@ mod tests {
         );
         assert_eq!(app.status_message.as_deref(), Some("Created prompt: beta"));
         assert!(app.prompts.iter().any(|p| p.name == "beta"));
-        std::env::remove_var("EDITOR");
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -3472,7 +3493,7 @@ mod tests {
     #[test]
     fn prompts_new_empty_name_ignored_on_enter() {
         let (mut app, tmp) = prompts_app("new-empty", "alpha");
-        std::env::set_var("EDITOR", "true");
+        let _guard = EnvGuard::set("EDITOR", "true");
         press(&mut app, KeyCode::Char('n'));
         press(&mut app, KeyCode::Enter);
         assert!(app.new_prompt_name.is_none());
@@ -3485,7 +3506,6 @@ mod tests {
             app.status_message.as_deref(),
             Some("Enter prompt name, then press Enter")
         );
-        std::env::remove_var("EDITOR");
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -3499,12 +3519,11 @@ mod tests {
         let mut perms = std::fs::metadata(&script).unwrap().permissions();
         perms.set_mode(0o755);
         std::fs::set_permissions(&script, perms).unwrap();
-        std::env::set_var("EDITOR", &script);
+        let _guard = EnvGuard::set("EDITOR", &script.to_string_lossy());
         app.list_selected = 1;
         press(&mut app, KeyCode::Char('e'));
         assert_eq!(app.prompts[0].body, "# edited body\n");
         assert_eq!(app.status_message.as_deref(), Some("Edited: alpha"));
-        std::env::remove_var("EDITOR");
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -3784,8 +3803,12 @@ mod tests {
 
     #[test]
     fn enter_os_incompatible_method_shows_not_available() {
-        let previous_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", std::env::temp_dir().join("agentry-no-vscode-ext"));
+        let _guard = EnvGuard::set(
+            "HOME",
+            &std::env::temp_dir()
+                .join("agentry-no-vscode-ext")
+                .to_string_lossy(),
+        );
         let mut app = App::new();
         app.tab_index = 0;
         app.detected_agents = vec![DetectedAgent {
@@ -3817,10 +3840,6 @@ mod tests {
             app.status_message.as_deref(),
             Some("VS Code Ext is not available on this OS")
         );
-        match previous_home {
-            Some(home) => std::env::set_var("HOME", home),
-            None => std::env::remove_var("HOME"),
-        }
     }
 
     #[test]

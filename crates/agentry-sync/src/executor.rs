@@ -286,4 +286,90 @@ mod tests {
         // Cleanup
         let _ = std::fs::remove_dir_all(&tmp_dir);
     }
+
+    #[test]
+    fn test_symlink_creates_relative_link() {
+        let tmp_dir =
+            std::env::temp_dir().join(format!("agentry_test_sync_symlink_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        let target = tmp_dir.join(".agents").join("skills").join("CLAUDE.md");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, "data").unwrap();
+        let dest = tmp_dir.join("config").join("nested").join("CLAUDE.md");
+        std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        std::fs::write(&dest, "stale").unwrap();
+        let prompt = make_prompt("test");
+        let mapping = SyncMapping {
+            prompt_id: "test".to_string(),
+            agent_id: "claude-code".to_string(),
+            destination: dest.clone(),
+            target_format: agentry_core::models::PromptFormat::PlainMd,
+            action: SyncAction::Symlink,
+            status: agentry_core::models::SyncStatus::Missing,
+        };
+        let result = execute_sync(&prompt, &[mapping], false);
+        assert!(result[0].success, "{}", result[0].message);
+        assert!(dest.is_symlink());
+        assert_eq!(
+            std::fs::read_link(&dest).unwrap(),
+            Path::new("../../.agents/skills/CLAUDE.md")
+        );
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "data");
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_source_action_is_noop() {
+        let tmp_dir =
+            std::env::temp_dir().join(format!("agentry_test_sync_source_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        let dest = tmp_dir.join("AGENTS.md");
+        let prompt = make_prompt("test");
+        let mapping = SyncMapping {
+            prompt_id: "test".to_string(),
+            agent_id: "claude-code".to_string(),
+            destination: dest.clone(),
+            target_format: agentry_core::models::PromptFormat::PlainMd,
+            action: SyncAction::Source,
+            status: agentry_core::models::SyncStatus::Missing,
+        };
+        let result = execute_sync(&prompt, &[mapping], false);
+        assert!(result[0].success);
+        assert!(result[0].message.contains("no action"));
+        assert!(!dest.exists());
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_copy_failure_surfaces_when_parent_unwritable() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "agentry_test_sync_copy_fail_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        let parent = tmp_dir.join("ro");
+        std::fs::create_dir_all(&parent).unwrap();
+        let dest = parent.join("CLAUDE.md");
+        let mut perms = std::fs::metadata(&parent).unwrap().permissions();
+        perms.set_mode(0o555);
+        std::fs::set_permissions(&parent, perms).unwrap();
+        let prompt = make_prompt("test");
+        let mapping = SyncMapping {
+            prompt_id: "test".to_string(),
+            agent_id: "claude-code".to_string(),
+            destination: dest.clone(),
+            target_format: agentry_core::models::PromptFormat::PlainMd,
+            action: SyncAction::Copy,
+            status: agentry_core::models::SyncStatus::Missing,
+        };
+        let result = execute_sync(&prompt, &[mapping], false);
+        assert!(!result[0].success);
+        assert!(result[0].message.contains("Write error"));
+        assert!(!dest.exists());
+        let mut perms = std::fs::metadata(&parent).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&parent, perms).unwrap();
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
 }

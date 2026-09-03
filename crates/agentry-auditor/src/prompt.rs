@@ -107,4 +107,27 @@ mod tests {
         assert!(prompt.contains("config.md"));
         std::fs::remove_dir_all(&home).unwrap();
     }
+
+    #[test]
+    fn prompt_includes_focused_finding_check_id() {
+        use agentry_audit::report::{AuditFinding, FindingCategory, Severity};
+        let home = temp_home("agentry_test_prompt_focus_id");
+        let focus = AuditFinding {
+            check_id: "install.binary_missing".to_string(),
+            severity: Severity::Warning,
+            category: FindingCategory::Installation,
+            agent_id: Some("codex".to_string()),
+            message: "binary missing".to_string(),
+            remediation: "install it".to_string(),
+            auto_fixable: false,
+            fix: None,
+            suggested_fix: None,
+            evidence: None,
+        };
+        let ctx = package(empty_report(), Some(focus), &[], vec![]);
+        let prompt = build_prompt(&ctx, &home);
+        assert!(prompt.contains("## Focus finding"));
+        assert!(prompt.contains("install.binary_missing"));
+        std::fs::remove_dir_all(&home).unwrap();
+    }
 }

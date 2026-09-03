@@ -1,4 +1,5 @@
 use crate::engine::CheckContext;
+use crate::fix::is_safe_shell_command;
 use crate::report::{AuditFinding, FindingCategory, FixAction, Severity};
 
 pub fn run(ctx: &CheckContext) -> Vec<AuditFinding> {
@@ -30,10 +31,12 @@ fn binary_missing(
         .install_methods
         .first()
         .map(|m| m.install_command(None));
-    let fix = install_command.map(|command| FixAction::ShellCommand {
-        description: format!("Install {} via preferred method", agent.spec.name),
-        command,
-    });
+    let fix = install_command
+        .filter(|command| is_safe_shell_command(command))
+        .map(|command| FixAction::ShellCommand {
+            description: format!("Install {} via preferred method", agent.spec.name),
+            command,
+        });
     vec![AuditFinding {
         check_id: "install.binary_missing".to_string(),
         severity: Severity::Warning,
@@ -43,16 +46,23 @@ fn binary_missing(
             "{} has configuration on disk but binary '{}' is not on PATH",
             agent.spec.name, agent.spec.cli_binary
         ),
-        remediation: format!(
-            "Install {} via its preferred method ({})",
-            agent.spec.name,
-            agent
-                .spec
-                .install_methods
-                .first()
-                .map(|m| m.label())
-                .unwrap_or("unknown")
-        ),
+        remediation: if fix.is_some() {
+            format!(
+                "Install {} via its preferred method ({})",
+                agent.spec.name,
+                agent
+                    .spec
+                    .install_methods
+                    .first()
+                    .map(|m| m.label())
+                    .unwrap_or("unknown")
+            )
+        } else {
+            format!(
+                "Download and run the installer for {} manually",
+                agent.spec.name
+            )
+        },
         auto_fixable: fix.is_some(),
         fix,
         suggested_fix: None,
@@ -227,6 +237,30 @@ mod tests {
             }
             other => panic!("expected ShellCommand fix, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn binary_missing_direct_download_is_not_auto_fixable() {
+        let tmp = TempDir::new("agentry_audit_install_direct_download");
+        let mut spec = spec("codex", "codex", ".codex");
+        spec.install_methods = vec![InstallMethod::DirectDownload {
+            url: "https://example.com/install.sh".to_string(),
+            binary_name: "codex".to_string(),
+        }];
+        let agent = agent(spec, true);
+        let findings = run(&ctx(
+            tmp.path().clone(),
+            vec![agent],
+            vec!["other-tool".to_string()],
+        ));
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].check_id, "install.binary_missing");
+        assert!(!findings[0].auto_fixable);
+        assert!(findings[0].fix.is_none());
+        assert!(findings[0].remediation.contains("manually"));
+        let outcome = crate::fix::apply_fix(&findings[0], tmp.path());
+        assert!(!outcome.success);
+        assert!(outcome.message.contains("no fix action"));
     }
 
     #[test]

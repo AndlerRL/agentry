@@ -569,4 +569,124 @@ mod tests {
         assert!(resolved.is_none());
         std::fs::remove_dir_all(&home).unwrap();
     }
+
+    struct PathGuard {
+        original: Option<std::ffi::OsString>,
+    }
+
+    impl PathGuard {
+        fn prepend(dir: &std::path::Path) -> Self {
+            let original = std::env::var_os("PATH");
+            let mut paths = vec![dir.to_path_buf()];
+            if let Some(existing) = &original {
+                paths.extend(std::env::split_paths(existing));
+            }
+            let joined = std::env::join_paths(paths).expect("failed to join PATH");
+            std::env::set_var("PATH", joined);
+            Self { original }
+        }
+    }
+
+    impl Drop for PathGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(value) => std::env::set_var("PATH", value),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+
+    #[test]
+    fn resolve_host_resolves_installed_binary_on_path() {
+        let home = temp_home("agentry_test_auditor_resolve_positive");
+        let bin_dir = home.join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let bin = bin_dir.join("fake-host-cli-xyz");
+        std::fs::write(&bin, "#!/bin/sh\nexit 0\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&bin).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&bin, perms).unwrap();
+        let _guard = PathGuard::prepend(&bin_dir);
+
+        let ctx = HarnessContext::new(home.clone(), Vec::new(), Vec::new());
+        let config = AuditorConfig {
+            host_cli: Some("ollama".to_string()),
+            ..Default::default()
+        };
+        let hosts = vec![
+            HostProfile {
+                id: "claude-code".to_string(),
+                display_name: "Claude Code".to_string(),
+                kind: agentry_harness::hosts::HostKind::AgentCli,
+                detect_binary: "definitely-not-installed-xyz".to_string(),
+                headless_command: Some("claude -p".to_string()),
+                model_argument: None,
+                transport: agentry_harness::hosts::Transport::Stdin,
+            },
+            HostProfile {
+                id: "ollama".to_string(),
+                display_name: "Ollama".to_string(),
+                kind: agentry_harness::hosts::HostKind::LocalRuntime,
+                detect_binary: "fake-host-cli-xyz".to_string(),
+                headless_command: Some("ollama run {model}".to_string()),
+                model_argument: Some("{model}".to_string()),
+                transport: agentry_harness::hosts::Transport::Stdin,
+            },
+        ];
+        let resolved = resolve_host(&ctx, &config, &hosts);
+        assert_eq!(resolved.map(|h| h.id.as_str()), Some("ollama"));
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn host_timeout_yields_run_failed_with_timeout_evidence() {
+        let home = temp_home("agentry_test_auditor_timeout");
+        let script = home.join("slow_host");
+        std::fs::write(&script, "#!/bin/sh\nsleep 5\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+        std::fs::create_dir_all(home.join(".agents")).unwrap();
+        let payload_path = home.join("payload.txt");
+        std::fs::write(&payload_path, "verdict: []").unwrap();
+        std::fs::write(
+            home.join(".agents").join("agentry.toml"),
+            format!(
+                "[hosts]\npriority = [\"ollama\"]\n\n[hosts.ollama]\ndetect_binary = \"{}\"\n\n[auditor]\nhost_cli = \"ollama\"\ncommand_template = \"{} {}\"\ntimeout_secs = 1\n",
+                script.display(),
+                script.display(),
+                payload_path.display(),
+            ),
+        )
+        .unwrap();
+        let ctx = HarnessContext::new(home.clone(), Vec::new(), Vec::new())
+            .with_report(Some(empty_report()));
+        let mut registry = agentry_harness::HarnessRegistry::new();
+        registry.register(Box::new(AuditorReviewAction));
+        let output = registry
+            .invoke_confirmed(
+                &ctx,
+                "auditor.review",
+                ActionInput::AuditorReview {
+                    focus_check_id: None,
+                },
+            )
+            .await
+            .unwrap();
+        match output {
+            ActionOutput::AuditorMerged { added, report } => {
+                assert_eq!(added, 1);
+                let finding = report
+                    .global_findings
+                    .iter()
+                    .find(|f| f.check_id == "auditor.run_failed")
+                    .expect("run_failed finding");
+                assert!(finding.evidence.as_deref().unwrap().contains("timed out"));
+            }
+            other => panic!("unexpected output: {other:?}"),
+        }
+        std::fs::remove_dir_all(&home).unwrap();
+    }
 }

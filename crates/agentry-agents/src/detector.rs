@@ -620,7 +620,7 @@ mod tests {
     }
 
     #[test]
-    fn detect_agent_marks_installed_when_binary_found() {
+    fn detect_agent_marks_not_installed_when_binary_missing() {
         // We test with a spec whose binary almost certainly does NOT exist.
         // This verifies the detection path works end-to-end.
         let spec = AgentSpec {
@@ -644,5 +644,59 @@ mod tests {
         assert!(detected.version.is_none());
         assert!(!detected.config_dir_exists);
         assert!(!detected.prompt_file_exists);
+    }
+
+    struct PathGuard {
+        original: Option<std::ffi::OsString>,
+    }
+
+    impl PathGuard {
+        fn prepend(dir: &Path) -> Self {
+            let original = std::env::var_os("PATH");
+            let mut paths = vec![dir.to_path_buf()];
+            if let Some(existing) = &original {
+                paths.extend(std::env::split_paths(existing));
+            }
+            let joined = std::env::join_paths(paths).expect("failed to join PATH");
+            std::env::set_var("PATH", joined);
+            Self { original }
+        }
+    }
+
+    impl Drop for PathGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(value) => std::env::set_var("PATH", value),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+
+    #[test]
+    fn detect_agent_marks_installed_when_binary_found_on_path() {
+        let tmp = TempDir::new("detect_positive_test");
+        let bin = tmp.path().join("fake-agent-cli-xyz");
+        fs::write(&bin, "#!/bin/sh\necho \"1.2.3\"\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&bin).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&bin, perms).unwrap();
+        let _guard = PathGuard::prepend(tmp.path());
+
+        let spec = AgentSpec {
+            id: "test-positive".into(),
+            name: "Test Agent".into(),
+            cli_binary: "fake-agent-cli-xyz".into(),
+            config_dir: ".test-positive-dir".into(),
+            prompt_filename: "TEST.md".into(),
+            prompt_format: PromptFormat::PlainMd,
+            skills_dir_name: None,
+            max_size: None,
+            install_methods: Vec::new(),
+        };
+
+        let detected = detect_agent(&spec);
+        assert!(detected.installed, "binary on PATH should mark installed");
+        assert_eq!(detected.version.as_deref(), Some("1.2.3"));
     }
 }
