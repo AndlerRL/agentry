@@ -194,6 +194,11 @@ async fn run_tui() -> Result<()> {
     )?;
     terminal.show_cursor()?;
 
+    if let Some(msg) = app.panic_message {
+        eprintln!("TUI panic: {msg}");
+        return Err(anyhow::anyhow!("TUI panic: {msg}"));
+    }
+
     result
 }
 

@@ -87,6 +87,7 @@ pub struct App {
     pub audit_filter: Option<agentry_audit::report::Severity>,
     pub harness: agentry_harness::HarnessRegistry,
     pub harness_confirm: Option<HarnessPendingInvocation>,
+    pub panic_message: Option<String>,
 }
 
 pub struct HarnessPendingInvocation {
@@ -141,6 +142,20 @@ fn is_safe_version(s: &str) -> bool {
     !s.is_empty()
         && s.chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '+'))
+}
+
+fn catch_panic<T>(f: impl FnOnce() -> T) -> std::thread::Result<T> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+}
+
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic".to_string()
+    }
 }
 
 fn parse_versions(stdout: &str, method: &agentry_core::models::InstallMethod) -> Vec<String> {
@@ -216,6 +231,7 @@ impl App {
                 registry
             },
             harness_confirm: None,
+            panic_message: None,
         }
     }
 
@@ -246,12 +262,24 @@ impl App {
                 self.needs_terminal_clear = false;
             }
 
-            terminal.draw(|f| self.draw(f))?;
+            match catch_panic(|| terminal.draw(|f| self.draw(f))) {
+                Err(panic) => {
+                    self.panic_message = Some(panic_message(panic.as_ref()));
+                    self.should_quit = true;
+                    break;
+                }
+                Ok(Err(err)) => return Err(err.into()),
+                Ok(Ok(_)) => {}
+            }
 
             // Poll for events with timeout
             if crossterm::event::poll(std::time::Duration::from_millis(100))? {
                 if let Event::Key(key) = event::read()? {
-                    self.handle_key(key)?;
+                    if let Err(panic) = catch_panic(|| self.handle_key(key)) {
+                        self.panic_message = Some(panic_message(panic.as_ref()));
+                        self.should_quit = true;
+                        break;
+                    }
                 }
             }
 
@@ -2016,6 +2044,25 @@ mod tests {
         app.tab_index = 4;
         app.audit_report = Some(report);
         app
+    }
+
+    #[test]
+    fn catch_panic_returns_err_and_extracts_message() {
+        let result = catch_panic(|| panic!("boom"));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(panic_message(err.as_ref()), "boom");
+    }
+
+    #[test]
+    fn catch_panic_returns_ok_for_normal_closure() {
+        assert_eq!(catch_panic(|| 42).unwrap(), 42);
+    }
+
+    #[test]
+    fn panic_message_falls_back_for_unknown_payload() {
+        let payload = Box::new(7u64);
+        assert_eq!(panic_message(payload.as_ref()), "unknown panic");
     }
 
     #[test]
