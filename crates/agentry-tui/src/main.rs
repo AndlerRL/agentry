@@ -1,5 +1,6 @@
 mod app;
 mod event;
+mod onboarding;
 mod ui;
 
 use anyhow::Result;
@@ -18,7 +19,7 @@ Amp, OpenCode, Firebender, DeepAgents, Antigravity, and Warp.\n\n\
 First run? Try `agentry setup` for guided onboarding.")]
 struct Cli {
     #[arg(short = 'v', long = "version", visible_short_alias = 'V', action = clap::ArgAction::Version)]
-    version_flag: bool,
+    version_flag: Option<bool>,
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -76,6 +77,15 @@ enum Commands {
     Auditor {
         #[command(subcommand)]
         action: AuditorCommands,
+    },
+    /// Guided onboarding: detect agents, offer installs, write harness config
+    Setup {
+        /// Non-interactive: install all installable agents, write config, run auditor setup
+        #[arg(long)]
+        yes: bool,
+        /// Show what would be done without making any changes
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -162,6 +172,7 @@ async fn main() -> Result<()> {
             yes,
         }) => cmd_audit(agent, json, severity, fix, yes).await,
         Some(Commands::Auditor { action }) => cmd_auditor(action).await,
+        Some(Commands::Setup { yes, dry_run }) => cmd_setup(yes, dry_run).await,
         None => run_tui().await,
     }
 }
@@ -924,6 +935,166 @@ async fn cmd_auditor(action: AuditorCommands) -> Result<()> {
             Ok(())
         }
     }
+}
+
+async fn cmd_setup(yes: bool, dry_run: bool) -> Result<()> {
+    use agentry_harness::context::{config_path, load_config, write_config};
+
+    let home = resolve_home();
+    let agents = agentry_agents::detect_all_agents().await;
+    let installed = agents.iter().filter(|agent| agent.installed).count();
+    let offers = onboarding::select_install_offers(&agents);
+
+    println!(
+        "Agentry setup — {installed}/{} agents installed\n",
+        agents.len()
+    );
+    for agent in &agents {
+        let status = if agent.installed { "✓" } else { "✗" };
+        let version = agent.version.as_deref().unwrap_or("---");
+        if agent.installed {
+            println!("  {status} {:<18} v{version}", agent.spec.name);
+        } else {
+            let available: Vec<&str> = agent
+                .spec
+                .install_methods
+                .iter()
+                .filter(|method| method.available_on_os())
+                .map(|method| method.method_key())
+                .collect();
+            if available.is_empty() {
+                println!(
+                    "  {status} {:<18} {:<8} (no install method)",
+                    agent.spec.name, "---"
+                );
+            } else {
+                println!(
+                    "  {status} {:<18} {:<8} [available: {}]",
+                    agent.spec.name,
+                    "---",
+                    available.join(", ")
+                );
+            }
+        }
+    }
+
+    if offers.is_empty() {
+        println!("\nAll known agents are installed or have no install method.");
+    } else {
+        println!("\n{} installable agent(s) missing:", offers.len());
+        for offer in &offers {
+            println!(
+                "  {} via {} — {}",
+                offer.agent_name,
+                offer.method.label(),
+                offer.command
+            );
+        }
+    }
+
+    let mut installed_agents: Vec<String> = Vec::new();
+    if !offers.is_empty() {
+        println!();
+        for offer in &offers {
+            let accepted = if dry_run {
+                println!(
+                    "[dry-run] would install {} via {}",
+                    offer.agent_name,
+                    offer.method.label()
+                );
+                true
+            } else if yes {
+                true
+            } else {
+                onboarding::confirm(&format!(
+                    "Install {} via {}? (y/n)",
+                    offer.agent_name,
+                    offer.method.label()
+                ))
+            };
+            if accepted {
+                if dry_run {
+                    continue;
+                }
+                println!("  running: {}", offer.command);
+                match onboarding::run_install_command(&offer.command) {
+                    Ok(true) => {
+                        println!("  ✓ installed {}", offer.agent_name);
+                        installed_agents.push(offer.agent_id.clone());
+                    }
+                    Ok(false) => {
+                        println!("  ✗ install command failed for {}", offer.agent_name);
+                    }
+                    Err(err) => {
+                        println!("  ✗ {err}");
+                    }
+                }
+            } else {
+                println!("  skipped {}", offer.agent_name);
+            }
+        }
+    }
+
+    let config_path = config_path(&home);
+    let config_exists = config_path.exists();
+    if dry_run {
+        if config_exists {
+            println!("\n[dry-run] ~/.agents/agentry.toml exists — would leave unchanged");
+        } else {
+            println!("\n[dry-run] would write ~/.agents/agentry.toml with [harness]/[local]/[onboarding] defaults");
+        }
+        println!(
+            "[dry-run] would run auditor setup (config + canonical prompt + lockfile adoption)"
+        );
+    } else {
+        if config_exists {
+            println!("\n~/.agents/agentry.toml exists — leaving unchanged");
+        } else {
+            let mut config = load_config(&home);
+            if config.harness.enabled_agents.is_empty() {
+                config = onboarding::default_harness_config(&agents);
+            }
+            write_config(&home, &config).map_err(|err| anyhow::anyhow!(err))?;
+            println!("\nwrote ~/.agents/agentry.toml with [harness]/[local]/[onboarding] defaults");
+        }
+        let report = onboarding::run_auditor_setup(&home).map_err(|err| anyhow::anyhow!(err))?;
+        if report.config_written {
+            println!("  wrote [auditor] defaults to ~/.agents/agentry.toml");
+        }
+        if report.prompt_written {
+            println!("  wrote canonical prompt to ~/.agents/prompts/agentry-auditor.md");
+        }
+        if report.collection_adopted {
+            println!("  adopted context-engineering-collection into the skill lockfile");
+        }
+    }
+
+    println!("\nSetup summary:");
+    if dry_run {
+        println!("  installs: {} would be installed", offers.len());
+        println!(
+            "  config: {}",
+            if config_exists {
+                "already present"
+            } else {
+                "would be written"
+            }
+        );
+        println!("  auditor: would be set up");
+    } else {
+        println!("  installed: {}", installed_agents.len());
+        println!(
+            "  config: {}",
+            if config_exists {
+                "already present"
+            } else {
+                "written"
+            }
+        );
+        println!("  auditor: set up");
+    }
+    println!("\nRun `agentry audit` to check your setup");
+    Ok(())
 }
 
 #[cfg(test)]
